@@ -13,8 +13,15 @@ on:
     # main 之外也放行 feature 分支：fork 上 workflow_dispatch 要求文件在默认分支，
     # 而默认分支是 legacy（另一个老 workflow），没法从这里手动触发。
     branches: [main, 'feat/**']
+    # 打 tag 也构建，并由 release job 发 GitHub Release（用户从 fork 下改版）。
+    tags: ['*']
   pull_request:
   workflow_dispatch:
+
+# 发布 Release 需要写 release/asset 权限（仓库 Settings → Actions 里
+# GITHUB_TOKEN 默认可能是只读；若为只读，把它改成 Read and write）。
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -106,3 +113,30 @@ jobs:
             build/module/anland-awl.zip
             build/anlandx.tar.gz
           if-no-files-found: error
+
+  # 打 tag 时发布 GitHub Release。6.x 是「启动单应用」模式，用户只需要三件：
+  #   module/anland-awl.zip  宿主模块（waylandbridge daemon）
+  #   anland-wayland.apk     宿主 APK（com.anlandnext，每个窗口一个 Activity）
+  #   anlandx.tar.gz         容器侧会话（wayland 链路 + rootless Xwayland + mini-wm）
+  # anland-awllib.aar 是给「把自己的 app 变成 consumer」的开发者用的库，
+  # 终端用户经 anland-shell 启动应用不需要它，所以不进 Release。
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: anland-build
+          path: dist
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/module/anland-awl.zip
+            dist/anland-wayland.apk
+            dist/anlandx.tar.gz
