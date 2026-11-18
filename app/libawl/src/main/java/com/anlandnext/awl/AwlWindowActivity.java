@@ -2066,8 +2066,9 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     @Override public int outputWidth() { return Math.max(1, sv.getWidth()); }
     @Override public int outputHeight() { return Math.max(1, sv.getHeight()); }
 
-    @Override public float outputOriginX() { return 0f; }
-    @Override public float outputOriginY() { return 0f; }
+    /** 沉浸式映射出来的是窗口坐标，原点即 SurfaceView 在窗口里的位置。 */
+    @Override public float outputOriginX() { return svOffset[0]; }
+    @Override public float outputOriginY() { return svOffset[1]; }
 
     @Override public float displayRefreshHz() {
         android.view.Display d = getDisplay();
