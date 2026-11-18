@@ -422,6 +422,13 @@ public class WlSettingsActivity extends Activity {
                 anland.edit().putBoolean("immersive_auto_enter", on).apply());
         root.addView(autoEnterSw);
 
+        android.widget.Switch oplusSw = new android.widget.Switch(this);
+        oplusSw.setText(R.string.immersive_oplus_refresh);
+        oplusSw.setChecked(anland.getBoolean("oplus_refresh_rate_lock", false));
+        oplusSw.setOnCheckedChangeListener((b, on) ->
+                anland.edit().putBoolean("oplus_refresh_rate_lock", on).apply());
+        root.addView(oplusSw);
+
         TextView bindStatus = new TextView(this);
         bindStatus.setTextSize(14);
         root.addView(bindStatus);

@@ -41,6 +41,7 @@ import android.widget.TextView;
 
 import com.anlandnext.awl.immersive.ImmersiveInputController;
 import com.anlandnext.awl.immersive.ImmersiveMode;
+import com.anlandnext.awl.immersive.OplusRefreshRateLease;
 import com.anlandnext.awl.immersive.Touchpad;
 import com.anlandnext.awl.ui.ExtraKeysBar;
 import com.anlandnext.awl.ui.KeyResolver;
@@ -2047,6 +2048,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
          * Closing = Awl.closeWindow (daemon T_CLOSE) → client closes the
          * window → C_CLOSE → finish */
         attached = false;
+        OplusRefreshRateLease.release(this);   /* 进程级引用计数，别把锁留给下一个窗口 */
         super.onDestroy();
     }
 
@@ -2116,7 +2118,18 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
 
     @Override public void onImmersiveChanged(boolean active) {
         if (immersive != null) immersive.onSessionActiveChanged(active);
-        if (!active) setPointerCaptureMode(CAPTURE_NONE, 0, 0, 0, 0);
+        if (!active) {
+            setPointerCaptureMode(CAPTURE_NONE, 0, 0, 0, 0);
+            /* 刷新率锁是进程级引用计数：本窗口退出会话就还自己那份。 */
+            OplusRefreshRateLease.release(this);
+            return;
+        }
+        /* 指针在整个会话期间被 evdev 层抓走，安卓的 capture 失效；用户
+         * 「捕获外部指针」的设置保持不变，会话结束后自动恢复。 */
+        if (hasWindowFocus()
+                && getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .getBoolean(OplusRefreshRateLease.KEY_ENABLED, false))
+            OplusRefreshRateLease.acquire(this);
     }
 
     private final class ImmersiveTouchpadOutput implements Touchpad.Output {

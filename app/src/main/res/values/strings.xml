@@ -51,6 +51,7 @@
     <string name="immersive_tip">Immersive mode (anland5 style, needs root): the touchscreen, keyboard and pointer are handed to the desktop, so Android stops seeing them. Bind a key below — press it once to enter, again to leave.</string>
     <string name="immersive_switch">Enable immersive mode</string>
     <string name="immersive_auto_enter">Automatically enter when a window resumes</string>
+    <string name="immersive_oplus_refresh">Keep OnePlus refresh rate fixed during a session</string>
     <string name="immersive_bind">Bind immersive key</string>
     <string name="immersive_bind_listening">Press the key to bind…</string>
     <string name="immersive_current">Current: %1$s</string>
