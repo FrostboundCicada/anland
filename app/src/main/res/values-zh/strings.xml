@@ -41,6 +41,9 @@
     <string name="extra_keys_never">从不显示</string>
     <string name="extra_keys_with_ime">随软键盘显示</string>
     <string name="extra_keys_floating">浮动按键栏（半透明, 覆盖在窗口上）</string>
+    <string name="extra_keys_layout">自定义按键布局…</string>
+    <string name="extra_keys_layout_default">恢复默认</string>
+    <string name="extra_keys_layout_hint">JSON，格式与内置布局一致。留空则用默认。</string>
     <string name="key_intercept_tip">硬件键拦截（anland5 样式, 需无障碍服务; 把 Fn / F1-F12 / Back→Esc 转发给焦点窗口）:</string>
     <string name="key_intercept">拦截硬件键</string>
 

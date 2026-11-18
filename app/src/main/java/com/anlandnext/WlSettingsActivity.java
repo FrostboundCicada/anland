@@ -375,6 +375,11 @@ public class WlSettingsActivity extends Activity {
                 anland.edit().putBoolean("extra_keys_floating", on).apply());
         root.addView(extraFloatSw);
 
+        android.widget.Button layoutBtn = new android.widget.Button(this);
+        layoutBtn.setText(R.string.extra_keys_layout);
+        layoutBtn.setOnClickListener(v -> showExtraKeysLayoutEditor());
+        root.addView(layoutBtn);
+
         android.widget.Space gap6 = new android.widget.Space(this);
         gap6.setMinimumHeight(64);
         root.addView(gap6);
@@ -445,8 +450,46 @@ public class WlSettingsActivity extends Activity {
         setContentView(scroll);
     }
 
-    private static android.widget.LinearLayout.LayoutParams lp1() {
-        return new android.widget.LinearLayout.LayoutParams(
+    /** 额外按键栏的自定义 JSON 布局编辑器（anland5 行为）。 */
+    private void showExtraKeysLayoutEditor() {
+        SharedPreferences anland = getSharedPreferences("anland_settings", MODE_PRIVATE);
+        String cur = anland.getString("extra_keys_layout", null);
+        if (cur == null || cur.trim().isEmpty())
+            cur = com.anlandnext.awl.ui.ExtraKeysBar.defaultLayoutJson();
+
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setText(cur);
+        et.setTypeface(android.graphics.Typeface.MONOSPACE);
+        et.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        et.setMinLines(10);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.setPadding(48, 24, 48, 0);
+        sv.addView(et);
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.extra_keys_layout)
+                .setMessage(R.string.extra_keys_layout_hint)
+                .setView(sv)
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    String json = et.getText().toString();
+                    if (!json.trim().isEmpty()) {
+                        String err = com.anlandnext.awl.ui.ExtraKeysBar.validateLayout(json);
+                        if (err != null) {
+                            android.widget.Toast.makeText(this, err,
+                                    android.widget.Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                    }
+                    anland.edit().putString("extra_keys_layout", json).apply();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .setNeutralButton(R.string.extra_keys_layout_default,
+                        (d, w) -> et.setText(com.anlandnext.awl.ui.ExtraKeysBar.defaultLayoutJson()))
+                .show();
+    }
+
+    private static android.widget.LinearLayout.LayoutParams lp1() {        return new android.widget.LinearLayout.LayoutParams(
                 0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
     }
 }
