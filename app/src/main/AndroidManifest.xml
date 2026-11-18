@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 「窗口打开时显示设置通知」（anland5 设置），API 33+ 需运行时授权 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"

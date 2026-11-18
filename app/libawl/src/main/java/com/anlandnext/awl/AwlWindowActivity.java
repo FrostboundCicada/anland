@@ -1,6 +1,10 @@
 package com.anlandnext.awl;
 
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
@@ -583,6 +587,58 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         addVirtualKeyboard();/* anland5 样式的浮动虚拟键盘 */
         immersive = new ImmersiveInputController(this);   /* anland5 沉浸式（root 抓 evdev）*/
         applyOrientation();   /* anland5 设置：强制横/竖屏 */
+        maybeRequestNotificationPermission();
+    }
+
+    /* ---- 设置通知（anland5：窗口打开时常驻，点按回设置）---- */
+
+    private static final String NOTIF_CHANNEL = "anland_channel";
+    private static final int NOTIF_ID = 1;
+
+    /** API 33+ 需要运行时授权，否则通知不会显示（不授权也不影响别的）。 */
+    private void maybeRequestNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return;
+        if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            return;
+        requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+    }
+
+    /** 按设置项显示/隐藏常驻通知。 */
+    private void syncSettingsNotification() {
+        boolean wanted = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getBoolean("settings_notification", false);
+        if (wanted) showSettingsNotification();
+        else hideSettingsNotification();
+    }
+
+    private void showSettingsNotification() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        NotificationChannel ch = new NotificationChannel(NOTIF_CHANNEL,
+                getString(R.string.notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW);
+        ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        nm.createNotificationChannel(ch);
+
+        Intent it = new Intent("anland.action.OPEN_SETTINGS");
+        it.setPackage(getPackageName());
+        PendingIntent pi = PendingIntent.getActivity(this, 0, it,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Notification n = new Notification.Builder(this, NOTIF_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_menu_preferences)
+                .setContentTitle(getString(R.string.notification_title))
+                .setContentText(getString(R.string.notification_text))
+                .setContentIntent(pi)
+                .setOngoing(true)
+                .build();
+        nm.notify(NOTIF_ID, n);
+    }
+
+    private void hideSettingsNotification() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(NOTIF_ID);
     }
 
     /** 屏幕方向（anland5 的 screen_orientation：default / landscape / portrait）。 */
@@ -917,6 +973,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         super.onResume();
         setupFullscreen();   /* the system may reset immersive mode */
         applyOrientation();  /* 用户在设置里改了方向 */
+        syncSettingsNotification();
         Awl.registerCallback(winEvents);
         Awl.acquire();   /* process event subscription (sibling windows dying while this one is foreground) */
         if (clipMgr != null)
@@ -950,6 +1007,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         Awl.release();
         Awl.unregisterCallback(winEvents);
         if (immersive != null) immersive.stop();   /* 会话不得比前台活得久 */
+        hideSettingsNotification();
         Log.i(TAG, "win " + id + " PAUSE");
         super.onPause();
     }

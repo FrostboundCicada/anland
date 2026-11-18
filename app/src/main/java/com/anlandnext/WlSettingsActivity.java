@@ -512,6 +512,18 @@ public class WlSettingsActivity extends Activity {
                         .apply());
         root.addView(orientationRg);
 
+        /* ---- 设置通知（anland5）---- */
+        android.widget.Space gap10 = new android.widget.Space(this);
+        gap10.setMinimumHeight(64);
+        root.addView(gap10);
+
+        android.widget.Switch notificationSw = new android.widget.Switch(this);
+        notificationSw.setText(R.string.notification_switch);
+        notificationSw.setChecked(anland.getBoolean("settings_notification", false));
+        notificationSw.setOnCheckedChangeListener((b, on) ->
+                anland.edit().putBoolean("settings_notification", on).apply());
+        root.addView(notificationSw);
+
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(root);

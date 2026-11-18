@@ -14,4 +14,9 @@
     <string-array name="immersive_source_options">
         <item>直接（物理 evdev 节点）</item>
     </string-array>
+
+    <!-- 设置通知（anland5 设置） -->
+    <string name="notification_channel_name">Anland</string>
+    <string name="notification_title">Anland</string>
+    <string name="notification_text">点按打开设置</string>
 </resources>

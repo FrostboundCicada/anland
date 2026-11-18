@@ -32,4 +32,9 @@
     <string-array name="immersive_source_options">
         <item>Direct (physical event nodes)</item>
     </string-array>
+
+    <!-- 设置通知（anland5 设置） -->
+    <string name="notification_channel_name">Anland</string>
+    <string name="notification_title">Anland</string>
+    <string name="notification_text">Tap to open Settings</string>
 </resources>

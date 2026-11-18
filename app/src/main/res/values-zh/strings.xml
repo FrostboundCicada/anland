@@ -66,6 +66,12 @@
     <string name="orientation_default">默认（跟随系统）</string>
     <string name="orientation_landscape">强制横屏</string>
     <string name="orientation_portrait">强制竖屏</string>
+
+    <!-- 设置通知（anland5 设置） -->
+    <string name="notification_switch">窗口打开时显示设置通知</string>
+    <string name="notification_channel_name">Anland</string>
+    <string name="notification_title">Anland</string>
+    <string name="notification_text">点按打开设置</string>
     <string name="immersive_bind">绑定沉浸式按键</string>
     <string name="immersive_bind_listening">请按下要绑定的按键…</string>
     <string name="immersive_current">当前：%1$s</string>

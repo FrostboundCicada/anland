@@ -66,6 +66,12 @@
     <string name="orientation_default">Default (system)</string>
     <string name="orientation_landscape">Force landscape</string>
     <string name="orientation_portrait">Force portrait</string>
+
+    <!-- 设置通知（anland5 设置） -->
+    <string name="notification_switch">Show a settings notification while a window is open</string>
+    <string name="notification_channel_name">Anland</string>
+    <string name="notification_title">Anland</string>
+    <string name="notification_text">Tap to open Settings</string>
     <string name="immersive_bind">Bind immersive key</string>
     <string name="immersive_bind_listening">Press the key to bind…</string>
     <string name="immersive_current">Current: %1$s</string>
