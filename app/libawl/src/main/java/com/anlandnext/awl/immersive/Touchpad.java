@@ -111,8 +111,8 @@ public final class Touchpad {
     // millimetres, so the physical values do not carry over; these are multiples of
     // touchSlop instead, and both multipliers are exposed in Settings because the
     // right values depend on the pad. Defaults keep AOSP's ~4.7:1 ratio.
-    static final float DEFAULT_SCROLL_THRESHOLD_FACTOR = 0.5f;
-    static final float DEFAULT_MOVE_THRESHOLD_FACTOR = 2.35f;
+    public static final float DEFAULT_SCROLL_THRESHOLD_FACTOR = 0.5f;
+    public static final float DEFAULT_MOVE_THRESHOLD_FACTOR = 2.35f;
     private float scrollDistanceThreshold;
     private float moveDistanceThreshold;
 
@@ -120,7 +120,7 @@ public final class Touchpad {
     // this fraction of the other, so a diagonal drag can report both.
     private static final float AXIS_DOMINANCE_RATIO = 0.5f;
     /** Scroll distance per pixel of finger travel. Configurable in Settings. */
-    static final float DEFAULT_SCROLL_SPEED = 0.5f;
+    public static final float DEFAULT_SCROLL_SPEED = 0.5f;
     private float scrollSpeed = DEFAULT_SCROLL_SPEED;
     private boolean scrollReversed = false;
 
@@ -135,7 +135,7 @@ public final class Touchpad {
     private int outputHeight = 0;
 
     /** Side of the square, in output pixels, a forwarded gesture is mapped into. */
-    static final float DEFAULT_GESTURE_SCALE = 800f;
+    public static final float DEFAULT_GESTURE_SCALE = 800f;
     private float gestureScale = DEFAULT_GESTURE_SCALE;
 
     private float mouseAccelStrength = 1.0f; // 加速度强度，0.5 ~ 10.0

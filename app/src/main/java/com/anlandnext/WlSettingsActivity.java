@@ -451,6 +451,36 @@ public class WlSettingsActivity extends Activity {
         });
         root.addView(bindBtn);
 
+        /* ---- 触摸板设置（被抓取的物理触摸板，anland5 同一组键）---- */
+        android.widget.Space gap8 = new android.widget.Space(this);
+        gap8.setMinimumHeight(64);
+        root.addView(gap8);
+
+        TextView touchpadTip = new TextView(this);
+        touchpadTip.setText(R.string.touchpad_settings_tip);
+        root.addView(touchpadTip);
+
+        root.addView(touchpadSlider(anland, R.string.mouse_accel_label,
+                "mouse_speed", 0.5f, 10f, 1.0f, v -> String.format("%.1fx", v)));
+        root.addView(touchpadSlider(anland, R.string.scroll_speed_label,
+                "scroll_speed", 0.05f, 2f, 0.5f, v -> String.format("%.2f", v)));
+        root.addView(touchpadSlider(anland, R.string.gesture_scale_label,
+                "touchpad_gesture_scale", 100f, 2000f, 800f, v -> String.format("%.0f px", v)));
+
+        android.widget.Switch scrollReverseSw = new android.widget.Switch(this);
+        scrollReverseSw.setText(R.string.scroll_reverse);
+        scrollReverseSw.setChecked(anland.getBoolean("scroll_reverse", false));
+        scrollReverseSw.setOnCheckedChangeListener((b, on) ->
+                anland.edit().putBoolean("scroll_reverse", on).apply());
+        root.addView(scrollReverseSw);
+
+        android.widget.Switch disableMultiSw = new android.widget.Switch(this);
+        disableMultiSw.setText(R.string.disable_multi_finger);
+        disableMultiSw.setChecked(anland.getBoolean("disable_multi_finger_gestures", false));
+        disableMultiSw.setOnCheckedChangeListener((b, on) ->
+                anland.edit().putBoolean("disable_multi_finger_gestures", on).apply());
+        root.addView(disableMultiSw);
+
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(root);
@@ -494,6 +524,37 @@ public class WlSettingsActivity extends Activity {
                 .setNeutralButton(R.string.extra_keys_layout_default,
                         (d, w) -> et.setText(com.anlandnext.awl.ui.ExtraKeysBar.defaultLayoutJson()))
                 .show();
+    }
+
+    /** 触摸板设置里的一行滑动条（值存 anland_settings，浮点）。 */
+    private android.widget.LinearLayout touchpadSlider(SharedPreferences prefs,
+            int labelRes, String key, float min, float max, float def,
+            java.util.function.Function<Float, String> fmt) {
+        android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+        row.setOrientation(android.widget.LinearLayout.VERTICAL);
+
+        android.widget.TextView label = new android.widget.TextView(this);
+        row.addView(label);
+
+        android.widget.SeekBar bar = new android.widget.SeekBar(this);
+        final int steps = 100;
+        bar.setMax(steps);
+        float cur = prefs.getFloat(key, def);
+        bar.setProgress((int) Math.round((cur - min) / (max - min) * steps));
+        label.setText(getString(labelRes) + "  " + fmt.apply(cur));
+
+        bar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                if (!fromUser) return;
+                float v = min + (max - min) * p / steps;
+                label.setText(getString(labelRes) + "  " + fmt.apply(v));
+                prefs.edit().putFloat(key, v).apply();
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar sb) { }
+            @Override public void onStopTrackingTouch(android.widget.SeekBar sb) { }
+        });
+        row.addView(bar);
+        return row;
     }
 
     private static android.widget.LinearLayout.LayoutParams lp1() {        return new android.widget.LinearLayout.LayoutParams(

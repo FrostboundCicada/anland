@@ -52,6 +52,14 @@
     <string name="immersive_switch">启用沉浸式模式</string>
     <string name="immersive_auto_enter">窗口恢复时自动进入</string>
     <string name="immersive_oplus_refresh">会话期间保持 OnePlus 刷新率不变</string>
+
+    <!-- 触摸板设置（被抓取的物理触摸板） -->
+    <string name="touchpad_settings_tip">触摸板设置（用于被抓取的物理触摸板）:</string>
+    <string name="mouse_accel_label">指针加速度</string>
+    <string name="scroll_speed_label">双指滚动速度</string>
+    <string name="gesture_scale_label">手势幅度</string>
+    <string name="scroll_reverse">反向滚动</string>
+    <string name="disable_multi_finger">禁用捏合/多指手势</string>
     <string name="immersive_bind">绑定沉浸式按键</string>
     <string name="immersive_bind_listening">请按下要绑定的按键…</string>
     <string name="immersive_current">当前：%1$s</string>

@@ -2093,8 +2093,22 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     /** 被抓取的物理触摸板：识别出的运动即光标，点击是唯一的按键来源。 */
     @Override public Touchpad newGrabbedPad() {
         Touchpad pad = new Touchpad(this, new ImmersiveTouchpadOutput(), true);
+        applyImmersiveTouchpadPrefs(pad);
         pad.setOutputSize(outputWidth(), outputHeight());
         return pad;
+    }
+
+    /** 被抓取的物理触摸板套用用户的触摸板设置（与 5.x 同一组键，存在 anland_settings）。 */
+    private void applyImmersiveTouchpadPrefs(Touchpad pad) {
+        SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        pad.setAccelStrength(Math.max(0.5f, Math.min(10.0f, p.getFloat("mouse_speed", 1.0f))));
+        pad.setScrollSpeed(p.getFloat("scroll_speed", Touchpad.DEFAULT_SCROLL_SPEED));
+        pad.setScrollReversed(p.getBoolean("scroll_reverse", false));
+        pad.setGestureThresholds(
+                p.getFloat("touchpad_scroll_threshold", Touchpad.DEFAULT_SCROLL_THRESHOLD_FACTOR),
+                p.getFloat("touchpad_move_threshold", Touchpad.DEFAULT_MOVE_THRESHOLD_FACTOR));
+        pad.setGestureScale(p.getFloat("touchpad_gesture_scale", Touchpad.DEFAULT_GESTURE_SCALE));
+        pad.setMultiFingerGesturesDisabled(p.getBoolean("disable_multi_finger_gestures", false));
     }
 
     @Override public void movePointerRelative(float dx, float dy) {

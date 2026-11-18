@@ -52,6 +52,14 @@
     <string name="immersive_switch">Enable immersive mode</string>
     <string name="immersive_auto_enter">Automatically enter when a window resumes</string>
     <string name="immersive_oplus_refresh">Keep OnePlus refresh rate fixed during a session</string>
+
+    <!-- 触摸板设置（被抓取的物理触摸板） -->
+    <string name="touchpad_settings_tip">Touchpad settings (applied to a grabbed physical touchpad):</string>
+    <string name="mouse_accel_label">Pointer acceleration</string>
+    <string name="scroll_speed_label">Two-finger scroll speed</string>
+    <string name="gesture_scale_label">Gesture magnitude</string>
+    <string name="scroll_reverse">Reverse scroll direction</string>
+    <string name="disable_multi_finger">Disable pinch and multi-finger gestures</string>
     <string name="immersive_bind">Bind immersive key</string>
     <string name="immersive_bind_listening">Press the key to bind…</string>
     <string name="immersive_current">Current: %1$s</string>
