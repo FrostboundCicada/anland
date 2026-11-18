@@ -788,10 +788,7 @@ static void tr_kbd_leave(uint64_t win) {
 /* Key: update the bitmap/modifiers (consistent under the lock) → send key + modifiers directly */
 static void tr_key(uint64_t win, uint32_t code, uint32_t state, uint32_t meta) {
     /* 输入法抓走键盘期间，按键改投给输入法（由它决定上屏或吞掉） */
-    if (awl_im_grabbed()) {
-        awl_im_send_key(code, state, meta);
-        return;
-    }
+    if (awl_im_forward_key(code, state, meta)) return;
     uint32_t dep = 0, lck = 0;
     int mods_changed = 0;
     pthread_mutex_lock(&g_input_lock);

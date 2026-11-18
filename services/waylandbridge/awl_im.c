@@ -35,9 +35,6 @@ extern int awl_ime_im_state_unlocked(const char** surrounding, uint32_t* hint, u
 extern void awl_ime_im_activate(void);   /* text_input 获得焦点 → 通知本模块 */
 extern void awl_ime_im_deactivate(void);
 
-/* 按键改投：awl_input.c 的 tr_key 在 grab 期间改走这里 */
-void awl_im_send_key(uint32_t code, uint32_t state, uint32_t meta);
-
 struct awl_im_obj {
     struct wl_list link;
     struct wl_resource* res;      /* zwp_input_method_v2 */
@@ -311,12 +308,15 @@ void awl_im_setup(void) {
 
 /* ---------------- 按键改投（由 awl_input.c 调用） ---------------- */
 
-/* 输入法是否正抓着键盘 */
-int awl_im_grabbed(void) { return g_grab != NULL; }
-
-/* 把一个按键事件发给输入法（grab 期间） */
-void awl_im_send_key(uint32_t code, uint32_t state, uint32_t meta) {
-    if (!g_grab) return;
+/* 按键是否该改投给输入法（grab 期间）。
+ *
+ * 检查 + 发送都在 rwl(rd) 下完成：grab 资源由客户端请求创建/销毁（dispatch
+ * 线程），而按键来自 binder 线程 —— 先查后发之间 grab 可能已被 release，
+ * 那就成了 use-after-free。tr_key 的调用方都不持 rwl，取读锁是安全的。
+ * 返回 1 = 已改投给输入法（调用方不应再发给应用）。 */
+int awl_im_forward_key(uint32_t code, uint32_t state, uint32_t meta) {
+    pthread_rwlock_rdlock(&g_srv.rwl);
+    if (!g_grab) { pthread_rwlock_unlock(&g_srv.rwl); return 0; }
     /* 输入法侧的 modifier 状态独立维护（应用侧的状态由 awl_input.c 管） */
     static uint32_t im_dep = 0, im_lck = 0;
     uint32_t dep = 0, lck = 0;
@@ -331,5 +331,7 @@ void awl_im_send_key(uint32_t code, uint32_t state, uint32_t meta) {
     zwp_input_method_keyboard_grab_v2_send_key(
             g_grab, wl_display_next_serial(g_dpy), awl_now_ms(), code, state);
     wl_client_flush(c);
+    pthread_rwlock_unlock(&g_srv.rwl);
+    return 1;
 }
 
