@@ -633,6 +633,7 @@ void awl_ime_surface_gone(struct awl_surface* s) {
 
 void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t b) {
     if (!text) text = "";
+    int delivered = 0;
     pthread_rwlock_rdlock(&g_srv.rwl);
     struct awl_surface* s = awl_surface_by_id(id);
     if (!s || !s->resource) {
@@ -699,8 +700,18 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
         }
         wl_client_flush(c);
         pthread_mutex_unlock(&ts->ev_lock);
+        delivered = 1;
     }
     pthread_rwlock_unlock(&g_srv.rwl);
+
+    /* 没有可用的 text_input（终端类应用不实现 zwp_text_input_v3，只吃
+     * wl_keyboard）→ 把 ASCII 文本降级成按键。非 ASCII 会被跳过（见
+     * awl_input_text_as_keys 的注释）。 */
+    if (!delivered && op == AWL_IME_COMMIT) {
+        LOGD("ime_text: no enabled text_input for win=%llu, %zu bytes → keys",
+             (unsigned long long)id, strlen(text));
+        awl_input_text_as_keys(id, text);
+    }
 }
 
 /* ---------------- setup ---------------- */

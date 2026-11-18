@@ -822,6 +822,74 @@ static void tr_key(uint64_t win, uint32_t code, uint32_t state, uint32_t meta) {
     awl_datadev_key_mods(dm);
 }
 
+/* ---- 文本降级：ASCII → wl_keyboard 按键序列 ----
+ *
+ * 客户端没有可用的 text_input 时（终端类应用根本不实现 zwp_text_input_v3，
+ * 只吃 wl_keyboard），Android IME 的 commit_text 会被 awl_ime_text() 丢弃。
+ * 这里把可打印 ASCII 拆成按键：wl_keyboard 是 Wayland 核心协议，终端和
+ * 绝大多数应用都接受，这条路已被实测可用（Enter 键就是这个通路）。
+ *
+ * 非 ASCII（中文、emoji…）没有 evdev 码，无法用按键表达，只能跳过并记一条
+ * LOGD —— 中文输入需要 zwp_input_method_v2，是另一件事。 */
+
+typedef struct {
+    char ch;
+    uint8_t code;    /* linux/input-event-codes.h */
+    uint8_t shift;   /* 1 = 需要 LEFTSHIFT */
+} awl_char_key_t;
+
+static const awl_char_key_t g_char_keys[] = {
+    /* a-z */
+    {'a', 30, 0}, {'b', 48, 0}, {'c', 46, 0}, {'d', 32, 0}, {'e', 18, 0},
+    {'f', 33, 0}, {'g', 34, 0}, {'h', 35, 0}, {'i', 23, 0}, {'j', 36, 0},
+    {'k', 37, 0}, {'l', 38, 0}, {'m', 50, 0}, {'n', 49, 0}, {'o', 24, 0},
+    {'p', 25, 0}, {'q', 16, 0}, {'r', 19, 0}, {'s', 31, 0}, {'t', 20, 0},
+    {'u', 22, 0}, {'v', 47, 0}, {'w', 17, 0}, {'x', 45, 0}, {'y', 21, 0},
+    {'z', 44, 0},
+    /* A-Z（Shift + 小写码） */
+    {'A', 30, 1}, {'B', 48, 1}, {'C', 46, 1}, {'D', 32, 1}, {'E', 18, 1},
+    {'F', 33, 1}, {'G', 34, 1}, {'H', 35, 1}, {'I', 23, 1}, {'J', 36, 1},
+    {'K', 37, 1}, {'L', 38, 1}, {'M', 50, 1}, {'N', 49, 1}, {'O', 24, 1},
+    {'P', 25, 1}, {'Q', 16, 1}, {'R', 19, 1}, {'S', 31, 1}, {'T', 20, 1},
+    {'U', 22, 1}, {'V', 47, 1}, {'W', 17, 1}, {'X', 45, 1}, {'Y', 21, 1},
+    {'Z', 44, 1},
+    /* 0-9 与 Shift+数字 */
+    {'0', 11, 0}, {'1', 2, 0}, {'2', 3, 0}, {'3', 4, 0}, {'4', 5, 0},
+    {'5', 6, 0}, {'6', 7, 0}, {'7', 8, 0}, {'8', 9, 0}, {'9', 10, 0},
+    {')', 11, 1}, {'!', 2, 1}, {'@', 3, 1}, {'#', 4, 1}, {'$', 5, 1},
+    {'%', 6, 1}, {'^', 7, 1}, {'&', 8, 1}, {'*', 9, 1}, {'(', 10, 1},
+    /* 符号 */
+    {' ', 57, 0}, {'-', 12, 0}, {'_', 12, 1}, {'=', 13, 0}, {'+', 13, 1},
+    {'[', 26, 0}, {']', 27, 0}, {'{', 26, 1}, {'}', 27, 1},
+    {'\\', 43, 0}, {'|', 43, 1}, {';', 39, 0}, {':', 39, 1},
+    {'\'', 40, 0}, {'"', 40, 1}, {',', 51, 0}, {'<', 51, 1},
+    {'.', 52, 0}, {'>', 52, 1}, {'/', 53, 0}, {'?', 53, 1},
+    {'`', 41, 0}, {'~', 41, 1},
+    /* 控制字符 */
+    {'\n', 28, 0}, {'\t', 15, 0}, {'\b', 14, 0},
+};
+
+void awl_input_text_as_keys(uint64_t id, const char* text) {
+    if (!text) return;
+    size_t skipped = 0;
+    for (const char* p = text; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        const awl_char_key_t* hit = NULL;
+        if (c < 0x80) {
+            for (size_t i = 0; i < sizeof(g_char_keys) / sizeof(g_char_keys[0]); i++) {
+                if (g_char_keys[i].ch == c) { hit = &g_char_keys[i]; break; }
+            }
+        }
+        if (!hit) { skipped++; continue; }
+        if (hit->shift) tr_key(id, 42 /* KEY_LEFTSHIFT */, 1, 0);
+        tr_key(id, hit->code, 1, 0);
+        tr_key(id, hit->code, 0, 0);
+        if (hit->shift) tr_key(id, 42, 0, 0);
+    }
+    LOGD("text_as_keys id=%llu len=%zu skipped=%zu",
+         (unsigned long long)id, strlen(text), skipped);
+}
+
 /* Touch point grab table operations (g_input_lock; sid=0 = free slot — surface ids start at 1) */
 static uint64_t touch_target(int32_t tid) {
     pthread_mutex_lock(&g_input_lock);
