@@ -43,4 +43,12 @@
     <string name="extra_keys_floating">浮动按键栏（半透明, 覆盖在窗口上）</string>
     <string name="key_intercept_tip">硬件键拦截（anland5 样式, 需无障碍服务; 把 Fn / F1-F12 / Back→Esc 转发给焦点窗口）:</string>
     <string name="key_intercept">拦截硬件键</string>
+
+    <!-- 沉浸式模式（anland5 样式） -->
+    <string name="immersive_tip">沉浸式模式（anland5 样式，需 root）：把触摸屏、键盘和指针整体交给桌面，安卓不再收到。先在下面绑一颗按键，按一次进入，再按一次退出。</string>
+    <string name="immersive_switch">启用沉浸式模式</string>
+    <string name="immersive_auto_enter">窗口恢复时自动进入</string>
+    <string name="immersive_bind">绑定沉浸式按键</string>
+    <string name="immersive_bind_listening">请按下要绑定的按键…</string>
+    <string name="immersive_current">当前：%1$s</string>
 </resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 沉浸式模式（anland5 移植） -->
+    <string name="immersive_entering">已进入沉浸模式：所有输入交给桌面，再按一次 %1$s 退出</string>
+    <string name="immersive_exited">已退出沉浸模式</string>
+    <string name="immersive_no_scancode">请先为沉浸模式绑定按键</string>
+    <string name="immersive_failed">无法进入沉浸模式：root 被拒绝或不可用</string>
+    <string name="immersive_no_devices">无法进入沉浸模式：没有可接管的输入设备</string>
+    <string name="immersive_interrupted">沉浸模式已结束，输入已交还安卓</string>
+    <string name="immersive_entering_mode">已进入沉浸模式：%1$s</string>
+    <string name="immersive_selection_invalid">已保存的设备选择无效，请在“沉浸输入”设置中修正</string>
+    <string name="immersive_selection_filtered">所选设备全部已被占用，没有可接管的设备</string>
+    <string name="immersive_source_unavailable">该输入来源当前不可用</string>
+    <string-array name="immersive_source_options">
+        <item>直接（物理 evdev 节点）</item>
+    </string-array>
+</resources>

@@ -17,4 +17,19 @@
     <string name="keycode_unknown">Keycode %1$d</string>
     <string name="scancode_unknown">Scan code %1$d</string>
     <string name="status_current_none">Current: None</string>
+
+    <!-- 沉浸式模式（anland5 移植） -->
+    <string name="immersive_entering">Immersive mode: all input goes to the desktop. Press %1$s again to leave.</string>
+    <string name="immersive_exited">Immersive mode off</string>
+    <string name="immersive_no_scancode">Bind a key for immersive mode first</string>
+    <string name="immersive_failed">Could not start immersive mode: root was denied or is unavailable</string>
+    <string name="immersive_no_devices">Could not start immersive mode: no input device could be taken over</string>
+    <string name="immersive_interrupted">Immersive mode ended; input returned to Android</string>
+    <string name="immersive_entering_mode">Immersive mode on: %1$s</string>
+    <string name="immersive_selection_invalid">The saved device selection is not valid; fix it in Immersive input settings</string>
+    <string name="immersive_selection_filtered">Every selected device is already taken, so there is nothing left to grab</string>
+    <string name="immersive_source_unavailable">This input source is not available right now</string>
+    <string-array name="immersive_source_options">
+        <item>Direct (physical event nodes)</item>
+    </string-array>
 </resources>

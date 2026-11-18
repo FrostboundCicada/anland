@@ -3,18 +3,18 @@ package com.anlandnext.awl.ui;
 import java.util.Arrays;
 
 /** Decodes single-touch and both Linux multitouch protocols, without Android APIs. */
-final class EvdevTouchState {
-    static final int MAX_CONTACTS = 16;
+public final class EvdevTouchState {
+    public static final int MAX_CONTACTS = 16;
     private static final int ABS_X = 0x00, ABS_Y = 0x01, ABS_MT_SLOT = 0x2f;
     private static final int ABS_MT_POSITION_X = 0x35, ABS_MT_POSITION_Y = 0x36;
     private static final int ABS_MT_TOOL_TYPE = 0x37, ABS_MT_TRACKING_ID = 0x39;
     private static final int BTN_TOUCH = 0x14a, BTN_TOOL_PEN = 0x140, BTN_TOOL_RUBBER = 0x141;
 
-    final float[] x = new float[MAX_CONTACTS];
-    final float[] y = new float[MAX_CONTACTS];
+    public final float[] x = new float[MAX_CONTACTS];
+    public final float[] y = new float[MAX_CONTACTS];
     // A slot can be reused between two SYN_REPORTs. Its generation distinguishes
     // the new finger from the one the consumer still needs to release.
-    final long[] generation = new long[MAX_CONTACTS];
+    public final long[] generation = new long[MAX_CONTACTS];
     private final int[] trackingId = new int[MAX_CONTACTS];
     private final int[] toolType = new int[MAX_CONTACTS];
     private final boolean[] identified = new boolean[MAX_CONTACTS];
@@ -37,11 +37,11 @@ final class EvdevTouchState {
     private final int[] assigned = new int[MAX_CONTACTS];
     private final boolean[] used = new boolean[MAX_CONTACTS];
 
-    EvdevTouchState() {
+    public EvdevTouchState() {
         Arrays.fill(trackingId, -1);
     }
 
-    boolean key(int code, boolean pressed) {
+    public boolean key(int code, boolean pressed) {
         switch (code) {
             case BTN_TOUCH:
                 if (pressed && !touching && !sawTrackingId && !protocolA)
@@ -56,7 +56,7 @@ final class EvdevTouchState {
         return true;
     }
 
-    boolean abs(int code, int value) {
+    public boolean abs(int code, int value) {
         switch (code) {
             case ABS_X: singleX = value; validX = true; return true;
             case ABS_Y: singleY = value; validY = true; return true;
@@ -102,19 +102,19 @@ final class EvdevTouchState {
     }
 
     /** SYN_MT_REPORT terminates one protocol A contact, including an empty one. */
-    void endContact() {
+    public void endContact() {
         if (sawSlots)
             return;
         protocolA = true;
         appendPacket();
     }
 
-    boolean isProtocolA() {
+    public boolean isProtocolA() {
         return protocolA;
     }
 
     /** Commit only at SYN_REPORT, after all contacts and BTN_TOUCH are known. */
-    void endFrame() {
+    public void endFrame() {
         if (protocolA) {
             appendPacket();
             if (touchKnown && !touching)
@@ -129,7 +129,7 @@ final class EvdevTouchState {
         clearPacket();
     }
 
-    int gather(int[] out) {
+    public int gather(int[] out) {
         int count = 0;
         if (protocolA || sawTrackingId) {
             for (int i = 0; i < MAX_CONTACTS; i++) {
@@ -145,7 +145,7 @@ final class EvdevTouchState {
     }
 
     /** A lost frame cancels contacts; stale tracking ids must not resurrect them. */
-    void clear() {
+    public void clear() {
         Arrays.fill(trackingId, -1);
         Arrays.fill(toolType, 0);
         touchKnown = touching = pen = rubber = validX = validY = false;

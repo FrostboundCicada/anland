@@ -16,6 +16,29 @@ import android.widget.TextView;
  *  window-list long-press menu — all decisions live in the daemon, the APK
  *  has no policy left to configure.) */
 public class WlSettingsActivity extends Activity {
+    /** 绑定沉浸式按键时的「正在监听」窗口。 */
+    private boolean listeningKey = false;
+    private long listeningUntil = 0;
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent ev) {
+        if (listeningKey && ev.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+            listeningKey = false;
+            getSharedPreferences("anland_settings", MODE_PRIVATE).edit()
+                    .putInt("immersive_keycode", ev.getKeyCode())
+                    .putInt("immersive_scancode", ev.getScanCode())
+                    .apply();
+            android.widget.Toast.makeText(this,
+                    com.anlandnext.awl.ui.KeyCodeMapper.keyName(this,
+                            ev.getKeyCode(), ev.getScanCode()),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return true;
+        }
+        if (listeningKey && android.os.SystemClock.elapsedRealtime() > listeningUntil)
+            listeningKey = false;
+        return super.dispatchKeyEvent(ev);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -370,6 +393,51 @@ public class WlSettingsActivity extends Activity {
             KeyInterceptor.recheck();
         });
         root.addView(keySw);
+
+        /* ---- 沉浸式模式（anland5 样式，root 抓 evdev）---- */
+        android.widget.Space gap7 = new android.widget.Space(this);
+        gap7.setMinimumHeight(64);
+        root.addView(gap7);
+
+        TextView immersiveTip = new TextView(this);
+        immersiveTip.setText(R.string.immersive_tip);
+        root.addView(immersiveTip);
+
+        android.widget.Switch immersiveSw = new android.widget.Switch(this);
+        immersiveSw.setText(R.string.immersive_switch);
+        immersiveSw.setChecked(anland.getBoolean("immersive_enabled", false));
+        immersiveSw.setOnCheckedChangeListener((b, on) ->
+                anland.edit().putBoolean("immersive_enabled", on).apply());
+        root.addView(immersiveSw);
+
+        android.widget.Switch autoEnterSw = new android.widget.Switch(this);
+        autoEnterSw.setText(R.string.immersive_auto_enter);
+        autoEnterSw.setChecked(anland.getBoolean("immersive_auto_enter", false));
+        autoEnterSw.setOnCheckedChangeListener((b, on) ->
+                anland.edit().putBoolean("immersive_auto_enter", on).apply());
+        root.addView(autoEnterSw);
+
+        TextView bindStatus = new TextView(this);
+        bindStatus.setTextSize(14);
+        root.addView(bindStatus);
+
+        Runnable showBind = () -> {
+            int kc = anland.getInt("immersive_keycode", -1);
+            int sc = anland.getInt("immersive_scancode", 0);
+            bindStatus.setText(getString(R.string.immersive_current,
+                    com.anlandnext.awl.ui.KeyCodeMapper.keyName(this, kc, sc)));
+        };
+        showBind.run();
+
+        android.widget.Button bindBtn = new android.widget.Button(this);
+        bindBtn.setText(R.string.immersive_bind);
+        bindBtn.setOnClickListener(v -> {
+            listeningKey = true;
+            listeningUntil = android.os.SystemClock.elapsedRealtime() + 8000;
+            android.widget.Toast.makeText(this, R.string.immersive_bind_listening,
+                    android.widget.Toast.LENGTH_SHORT).show();
+        });
+        root.addView(bindBtn);
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(true);

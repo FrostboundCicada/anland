@@ -17,6 +17,18 @@ android {
         targetSdk 29
         versionCode 1
         versionName '0.1'
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // libinputgrab.so 是「可执行文件改名成 lib*.so」：必须用 legacy
+            // packaging 才会被解到 nativeLibraryDir 并带可执行权限，
+            // 应用才能用 `su -c` 跑它（沉浸式模式抓 evdev）。
+            useLegacyPackaging = true
+        }
     }
 
     compileOptions {

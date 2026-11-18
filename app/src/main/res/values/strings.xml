@@ -43,4 +43,12 @@
     <string name="extra_keys_floating">Floating bar (translucent, overlays the window)</string>
     <string name="key_intercept_tip">Hardware key interception (anland5 style, needs the accessibility service; forwards Fn / F1-F12 / Back→Esc to the focused window):</string>
     <string name="key_intercept">Intercept hardware keys</string>
+
+    <!-- 沉浸式模式（anland5 样式） -->
+    <string name="immersive_tip">Immersive mode (anland5 style, needs root): the touchscreen, keyboard and pointer are handed to the desktop, so Android stops seeing them. Bind a key below — press it once to enter, again to leave.</string>
+    <string name="immersive_switch">Enable immersive mode</string>
+    <string name="immersive_auto_enter">Automatically enter when a window resumes</string>
+    <string name="immersive_bind">Bind immersive key</string>
+    <string name="immersive_bind_listening">Press the key to bind…</string>
+    <string name="immersive_current">Current: %1$s</string>
 </resources>

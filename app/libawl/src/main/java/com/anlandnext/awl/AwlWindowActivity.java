@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Binder;
@@ -38,6 +39,9 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import com.anlandnext.awl.immersive.ImmersiveInputController;
+import com.anlandnext.awl.immersive.ImmersiveMode;
+import com.anlandnext.awl.immersive.Touchpad;
 import com.anlandnext.awl.ui.ExtraKeysBar;
 import com.anlandnext.awl.ui.KeyResolver;
 import com.anlandnext.awl.ui.VirtualKeyboardView;
@@ -69,7 +73,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * side + a full InputConnection table bridged to the text-input protocol
  * over binder; the daemon pushes the client's editor state.
  */
-public class AwlWindowActivity extends Activity {
+public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     private static final String TAG = "anland-awlwin";
     private static final ConcurrentHashMap<Long, AwlWindowActivity> LIVE = new ConcurrentHashMap<>();
 
@@ -576,6 +580,7 @@ public class AwlWindowActivity extends Activity {
         addHud();            /* anland5 样式的悬浮控件（SUPER / ENTER / KB）*/
         addExtraKeysBar();   /* anland5 样式的底部额外按键栏 */
         addVirtualKeyboard();/* anland5 样式的浮动虚拟键盘 */
+        immersive = new ImmersiveInputController(this);   /* anland5 沉浸式（root 抓 evdev）*/
     }
 
     /* ================= HUD（对齐 anland5 的悬浮控件）=================
@@ -634,6 +639,7 @@ public class AwlWindowActivity extends Activity {
 
     private ExtraKeysBar mExtraKeysBar;
     private VirtualKeyboardView mVirtualKeyboard;
+    private ImmersiveInputController immersive;
 
     private final ExtraKeysBar.Sender mExtraSender = new ExtraKeysBar.Sender() {
         @Override public void key(int action, int evdev) {
@@ -903,6 +909,7 @@ public class AwlWindowActivity extends Activity {
                 && sv.getHolder().getSurface().isValid())
             sendSurface(sv.getHolder(), lastW, lastH);
         fireHost((cbs, win, act) -> cbs.onHostResume(win, act));
+        if (immersive != null) immersive.enterAutomatically();   /* anland5：resume 时自动进入 */
         Log.i(TAG, "win " + id + " RESUME");
         /* capture state is daemon-owned: the SURFACE re-attach re-pushes
          * C_CAPTURE (a persistent constraint survives the pause) */
@@ -922,6 +929,7 @@ public class AwlWindowActivity extends Activity {
         attached = false;
         Awl.release();
         Awl.unregisterCallback(winEvents);
+        if (immersive != null) immersive.stop();   /* 会话不得比前台活得久 */
         Log.i(TAG, "win " + id + " PAUSE");
         super.onPause();
     }
@@ -1814,6 +1822,16 @@ public class AwlWindowActivity extends Activity {
         if (super.dispatchTouchEvent(ev))
             return true;
         if (id < 0) return false;   /* awaiting */
+        return handleTouchEvent(ev);
+    }
+
+    /**
+     * 触摸 → 客户端输入。真实触摸与沉浸式模式抓取到的触摸共用这一条路径，
+     * 这样触摸板模式、指针灵敏度、手势对两者含义一致。
+     */
+    boolean handleTouchEvent(MotionEvent ev) {
+        lastPointerX = ev.getX();
+        lastPointerY = ev.getY();
         if (isMouse(ev)) {
             int cls = ev.getClassification();
             if (cls == CLS_TWO_FINGER_SWIPE) {
@@ -1961,6 +1979,9 @@ public class AwlWindowActivity extends Activity {
      *  one more tap, so held-key auto-repeat still works. */
     @Override
     public boolean dispatchKeyEvent(KeyEvent ev) {
+        /* 沉浸式切换键优先：绑定的那颗键在会话内不得再传到桌面/安卓。 */
+        if (immersive != null && immersive.handleKey(ev))
+            return true;
         if (id < 0) return super.dispatchKeyEvent(ev);   /* awaiting */
         int kc = ev.getKeyCode();
         if (kc == KeyEvent.KEYCODE_VOLUME_UP || kc == KeyEvent.KEYCODE_VOLUME_DOWN
@@ -2027,5 +2048,97 @@ public class AwlWindowActivity extends Activity {
          * window → C_CLOSE → finish */
         attached = false;
         super.onDestroy();
+    }
+
+    /* ================= ImmersiveMode.Host =================
+     *
+     * 沉浸式模式（anland5 移植）：root helper 独占抓取触摸/键盘/指针，把事件
+     * 回放回桌面。每个回调都接到 libawl 的输入路径上，语义与 5.x 一致 ——
+     * 抓取到的触摸走真实的触摸路径，键盘/鼠标走 sendInput。 */
+
+    /** 最近一次指针位置，供按钮/滚动事件携带坐标。 */
+    private float lastPointerX, lastPointerY;
+
+    @Override public Context context() { return this; }
+
+    @Override public int outputWidth() { return Math.max(1, sv.getWidth()); }
+    @Override public int outputHeight() { return Math.max(1, sv.getHeight()); }
+
+    @Override public float outputOriginX() { return 0f; }
+    @Override public float outputOriginY() { return 0f; }
+
+    @Override public float displayRefreshHz() {
+        android.view.Display d = getDisplay();
+        return d != null ? d.getRefreshRate() : 0f;
+    }
+
+    @Override public int displayRotation() {
+        android.view.Display d = getDisplay();
+        return d != null ? d.getRotation() : android.view.Surface.ROTATION_0;
+    }
+
+    /** 抓取到的触摸屏帧（已是视图像素）：与真实触摸共用同一条转发路径。 */
+    @Override public void onGrabbedTouch(MotionEvent ev) {
+        if (id >= 0) handleTouchEvent(ev);
+    }
+
+    @Override public void onTouchscreenGrabChanged(boolean grabbed) {
+        /* Android 的 contact id 与 helper 的 slot 是两条流：换主人前结束旧的。 */
+        endPadStream();
+    }
+
+    /** 被抓取的物理触摸板：识别出的运动即光标，点击是唯一的按键来源。 */
+    @Override public Touchpad newGrabbedPad() {
+        Touchpad pad = new Touchpad(this, new ImmersiveTouchpadOutput(), true);
+        pad.setOutputSize(outputWidth(), outputHeight());
+        return pad;
+    }
+
+    @Override public void movePointerRelative(float dx, float dy) {
+        if (id >= 0) Awl.sendInput(id, Awl.PTR_REL, 0, dx, dy, 0f, 0f, 0);
+    }
+
+    @Override public void sendKey(int action, int evdev) {
+        if (id >= 0) Awl.sendKey(id, evdev, action == 0);
+    }
+
+    @Override public void sendMouseButton(int button, boolean pressed) {
+        if (id >= 0)
+            Awl.sendInput(id, Awl.PTR_BUTTON, button, lastPointerX, lastPointerY,
+                    pressed ? 1f : 0f, 0f, 0);
+    }
+
+    @Override public void sendMouseScroll(int axis, float value) {
+        if (id < 0) return;
+        if (axis == 0) Awl.sendInput(id, Awl.PTR_AXIS, 1, value, 0f, 0f, 0f, 0);
+        else          Awl.sendInput(id, Awl.PTR_AXIS, 1, 0f, value, 0f, 0f, 0);
+    }
+
+    @Override public void onImmersiveChanged(boolean active) {
+        if (immersive != null) immersive.onSessionActiveChanged(active);
+        if (!active) setPointerCaptureMode(CAPTURE_NONE, 0, 0, 0, 0);
+    }
+
+    private final class ImmersiveTouchpadOutput implements Touchpad.Output {
+        @Override public void onMotion(float dx, float dy) { movePointerRelative(dx, dy); }
+        @Override public void onScroll(int axis, float value) { sendMouseScroll(axis, value); }
+        @Override public void onButton(int button, boolean pressed) { sendMouseButton(button, pressed); }
+
+        @Override public void onTouch(int action, int pointerId, float x, float y) {
+            if (id < 0) return;
+            int type;
+            switch (action) {
+                case Touchpad.TOUCH_DOWN:  type = Awl.TOUCH_DOWN;   break;
+                case Touchpad.TOUCH_MOVE:  type = Awl.TOUCH_MOTION; break;
+                case Touchpad.TOUCH_UP:    type = Awl.TOUCH_UP;     break;
+                default:                   type = Awl.TOUCH_CANCEL; break;
+            }
+            Awl.sendInput(id, type, pointerId, x, y, 0f, 0f, 0);
+        }
+
+        @Override public void onTouchFrame() { /* 帧由 SYN_REPORT 天然分隔，无需额外标记 */ }
+
+        @Override public float cursorX() { return lastPointerX; }
+        @Override public float cursorY() { return lastPointerY; }
     }
 }
