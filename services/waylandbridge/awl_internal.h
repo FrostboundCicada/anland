@@ -557,6 +557,7 @@ int awl_im_forward_key(uint32_t code, uint32_t state, uint32_t meta);
 void awl_im_setup(void);            /* 创建 manager 全局（server_start） */
 void awl_im_activate(void);
 void awl_im_deactivate(void);
+void awl_im_notify_state(void);   /* 应用侧 text_input 状态变化 → 通知输入法 */
 /* Android meta → xkb modifier mask（与 awl_input.c 的按键路径共用） */
 void meta_to_masks(uint32_t meta, uint32_t* dep, uint32_t* lck);
 /* Cursor hooks (set_cursor state lives in awl_input.c, own g_cursor_lock;

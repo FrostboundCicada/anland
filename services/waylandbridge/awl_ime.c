@@ -310,6 +310,10 @@ static void ti3_commit(struct wl_client* c, struct wl_resource* res) {
         }
     }
     pthread_rwlock_unlock(&g_srv.rwl);
+
+    /* 应用侧 text_input 状态变化 → 通知 input_method（必须在锁外：
+     * awl_im_notify_state 自己取 rwl(rd)） */
+    if (o->enabled) awl_im_notify_state();
 }
 
 static const struct zwp_text_input_v3_interface ti3_iface = {
