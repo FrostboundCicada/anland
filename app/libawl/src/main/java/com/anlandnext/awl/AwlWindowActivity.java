@@ -135,6 +135,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     private int lastImeMargin = -1;
     private WindowInsets mLastInsets;      /* 最近一次窗口 insets，底栏显隐后重算 surface 缩进 */
     private int mBarHeight;                /* 额外按键栏高度（px），0 = 不显示 */
+    private int mBarPadL, mBarPadR;        /* 底栏为避开系统手势区的左右 padding */
     private boolean mBarFloating;          /* 底栏是否覆盖在画面上（不压缩 surface） */
     private int mBarOpacity = DEFAULT_BAR_OPACITY;   /* 底栏透明度（%） */
     private boolean attached;
@@ -581,6 +582,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         root.addView(hiddenInput, new FrameLayout.LayoutParams(1, 1));
         /* IME inset: in inset mode the surface yields (client reflows); in overlay mode the keyboard floats above */
         root.setOnApplyWindowInsetsListener((v, insets) -> {
+            applyBarGestureInsets(insets);
             applyImeInset(insets);
             return insets;
         });
@@ -723,6 +725,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         if (mode == 2) {
             mExtraKeysBar.setVisibility(View.GONE);  /* 随软键盘：onImeShow 再显示 */
         }
+        if (mLastInsets != null) applyBarGestureInsets(mLastInsets);   /* inset 可能先到 */
         applyImeInsetSafe();
     }
 
@@ -1052,9 +1055,26 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         return getSharedPreferences("awl", MODE_PRIVATE).getInt("ime_mode", 0) != 0;
     }
 
+    /**
+     * 底栏左右让开系统手势区。
+     *
+     * <p>-systemGestures() 给出的就是 InputDispatcher 的「手势拦截区」：左右边缘
+     * 各一条，落在里面的 touch 会被返回手势吃掉（实测底栏 ESC/TAB 在 x=79，
+     * 正落在 [0,84] 里，按键完全没反应）。把这两个 inset 作为底栏的左右
+     * padding，最外侧一列按键就移出手势区了。
+     */
+    private void applyBarGestureInsets(WindowInsets insets) {
+        if (mExtraKeysBar == null) return;
+        int l = insets.getInsets(WindowInsets.Type.systemGestures()).left;
+        int r = insets.getInsets(WindowInsets.Type.systemGestures()).right;
+        if (l == mBarPadL && r == mBarPadR) return;
+        mBarPadL = l;
+        mBarPadR = r;
+        mExtraKeysBar.setPadding(l, 0, r, 0);
+    }
+
     private void applyImeInset(WindowInsets insets) {
-        mLastInsets = insets;
-        int imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
+        mLastInsets = insets;        int imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
         int margin = imeOverlayMode() ? 0 : imeBottom + visibleBarHeight();
         if (margin == lastImeMargin) return;
         lastImeMargin = margin;
