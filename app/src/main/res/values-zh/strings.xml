@@ -14,6 +14,8 @@
     <string name="title_none">（无）</string>
     <string name="state_attached_foreground">Attached（前台）</string>
     <string name="state_detached_kept">Detached（保活）</string>
+    <string name="state_attached">已附加</string>
+    <string name="state_detached">已分离</string>
     <string name="dialog_ok">确定</string>
 
     <!-- WlSettingsActivity -->
@@ -40,7 +42,8 @@
     <string name="extra_keys_always">总是显示</string>
     <string name="extra_keys_never">从不显示</string>
     <string name="extra_keys_with_ime">随软键盘显示</string>
-    <string name="extra_keys_floating">浮动按键栏（半透明, 覆盖在窗口上）</string>
+    <string name="extra_keys_floating">沉浸式底栏（浮在画面上, 不占用屏幕空间）</string>
+    <string name="extra_keys_opacity">底栏透明度</string>
     <string name="extra_keys_layout">自定义按键布局…</string>
     <string name="extra_keys_layout_default">恢复默认</string>
     <string name="extra_keys_layout_hint">JSON，格式与内置布局一致。留空则用默认。</string>

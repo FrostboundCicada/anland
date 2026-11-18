@@ -135,6 +135,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     private WindowInsets mLastInsets;      /* 最近一次窗口 insets，底栏显隐后重算 surface 缩进 */
     private int mBarHeight;                /* 额外按键栏高度（px），0 = 不显示 */
     private boolean mBarFloating;          /* 底栏是否覆盖在画面上（不压缩 surface） */
+    private int mBarOpacity = DEFAULT_BAR_OPACITY;   /* 底栏透明度（%） */
     private boolean attached;
     private boolean finishingByGone;   /* client closed the window / evicted, nothing left to report */
     private boolean deathLinked;       /* daemon death monitoring attached */
@@ -585,7 +586,6 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         setContentView(root);
 
         setupFullscreen();   /* immersive */
-        addHud();            /* anland5 样式的悬浮控件（SUPER / ENTER / KB）*/
         addExtraKeysBar();   /* anland5 样式的底部额外按键栏 */
         addVirtualKeyboard();/* anland5 样式的浮动虚拟键盘 */
         immersive = new ImmersiveInputController(this);   /* anland5 沉浸式（root 抓 evdev）*/
@@ -661,49 +661,6 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         }
     }
 
-    /* ================= HUD（对齐 anland5 的悬浮控件）=================
-     *
-     * anland5 的 consumer 在画面上叠一层悬浮控件：右侧中部一个 SUPER 手势球、
-     * 右下角 ENTER / KB、左下角设置。anland6 只有窗口本身 —— 触屏设备上既
-     * 没有实体回车键，也没有软键盘开关，这两样正是它缺的。
-     *
-     *   SUPER   点按：发送 Left Meta（evdev 125）；长按：收起/展开整排
-     *   ENTER   evdev 0x1c 的 press + release
-     *   KB      切换软键盘（imeWanted）
-     *
-     * 位置按 anland5 的横屏布局：右下 ENTER/KB，右侧中部 SUPER。
-     * 半透明、不抢焦点（不含焦点性），浮在客户端画面之上。 */
-    private FrameLayout hudRoot;
-    private boolean hudVisible = true;
-
-    private int dp(int v) {
-        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
-    }
-
-    private void addHud() {
-        hudRoot = new FrameLayout(this);
-        hudRoot.setLayoutParams(new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
-        /* 让点击穿过 HUD 的空区到达客户端画面 */
-        hudRoot.setClickable(false);
-
-        /* 右下：ENTER（下）与 KB（上），两者用 bottomMargin 错开 */
-        hudRoot.addView(hudButton("ENTER", "回车", Gravity.BOTTOM | Gravity.END,
-                dp(16), dp(20), v -> sendHudKey(0x1c)));
-        hudRoot.addView(hudButton("KB", "软键盘", Gravity.BOTTOM | Gravity.END,
-                dp(16), dp(84), v -> toggleHudIme()));
-
-        /* 右侧中部：SUPER —— 点按发 Left Meta，长按收起/展开整排 */
-        TextView sup = hudButton("SUPER", "Super：点按发送，长按收起", Gravity.CENTER_VERTICAL | Gravity.END,
-                dp(16), 0, null);
-        sup.setOnClickListener(v -> sendHudKey(125));
-        sup.setOnLongClickListener(v -> { toggleHud(); return true; });
-        hudRoot.addView(sup);
-
-        root.addView(hudRoot);
-    }
-
     /* ================= anland5 风格的额外按键栏 / 虚拟键盘 =================
      *
      * 这两样是 anland5 consumer 的招牌输入 UI，anland6 原先只有窗口本身。
@@ -714,6 +671,9 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     /* 0 = 总是显示, 1 = 从不, 2 = 随软键盘 */
     private static final String KEY_EXTRA_KEYS_MODE = "extra_keys_mode";
     private static final String KEY_EXTRA_KEYS_FLOAT = "extra_keys_floating";
+    /* 底栏透明度（%）。默认 60%（半透明）。 */
+    private static final String KEY_EXTRA_KEYS_OPACITY = "extra_keys_opacity";
+    private static final int DEFAULT_BAR_OPACITY = 60;
 
     private ExtraKeysBar mExtraKeysBar;
     private VirtualKeyboardView mVirtualKeyboard;
@@ -726,7 +686,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         @Override public void text(String s) {
             if (id >= 0) Awl.sendText(id, s);
         }
-        @Override public void toggleKeyboard() { toggleHudIme(); }
+        @Override public void toggleKeyboard() { toggleIme(); }
         @Override public void toggleVirtualKeyboard() { toggleVirtualKeyboard(); }
         @Override public void openSettings() {
             Intent it = new Intent("anland.action.OPEN_SETTINGS");
@@ -747,8 +707,9 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
             return;
         }
         mExtraKeysBar = new ExtraKeysBar(this, mExtraSender);
-        mBarFloating = prefs.getBoolean(KEY_EXTRA_KEYS_FLOAT, false);
-        mExtraKeysBar.setFloating(mBarFloating);
+        /* 默认「沉浸式」：底栏浮在画面上，不压缩 surface（不占用屏幕空间）。 */
+        mBarFloating = prefs.getBoolean(KEY_EXTRA_KEYS_FLOAT, true);
+        mExtraKeysBar.setOpacity(prefs.getInt(KEY_EXTRA_KEYS_OPACITY, DEFAULT_BAR_OPACITY));
         /* 必须给显式高度：按钮是 GridLayout 的 height=0 + FILL，第一遍测量会拿到
          * EXACTLY 0 → 行的实测高度为 0 → WRAP_CONTENT 的 GridLayout 总高就是 0，
          * 底栏会完全不可见（5.x 也是一直用显式高度，见 MainActivity.mBarHeight）。 */
@@ -761,8 +722,6 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         if (mode == 2) {
             mExtraKeysBar.setVisibility(View.GONE);  /* 随软键盘：onImeShow 再显示 */
         }
-        /* 让 HUD 的 ENTER/KB 浮在按键栏之上，不重叠 */
-        if (hudRoot != null) hudRoot.setTranslationY(-mBarHeight);
         applyImeInsetSafe();
     }
 
@@ -791,14 +750,17 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     }
 
     /** 额外按键栏「随软键盘」模式：IME 显示/隐藏时同步。 */
+    /** 设置里改了底栏的「沉浸式 / 透明度」时立即生效（onResume 调用）。 */
     private void syncExtraKeysFloating() {
         if (mExtraKeysBar == null) return;
-        boolean floating = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .getBoolean(KEY_EXTRA_KEYS_FLOAT, false);
-        if (floating == mBarFloating) return;
+        SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean floating = p.getBoolean(KEY_EXTRA_KEYS_FLOAT, true);
+        int opacity = p.getInt(KEY_EXTRA_KEYS_OPACITY, DEFAULT_BAR_OPACITY);
+        if (floating == mBarFloating && opacity == mBarOpacity) return;
         mBarFloating = floating;
-        mExtraKeysBar.setFloating(floating);
-        applyImeInsetSafe();   /* 浮动时底栏覆盖画面，不再压缩 surface */
+        mBarOpacity = opacity;
+        mExtraKeysBar.setOpacity(opacity);
+        applyImeInsetSafe();   /* 沉浸式时底栏覆盖画面，不再压缩 surface */
     }
 
     /** 额外按键栏「随软键盘」模式：IME 显示/隐藏时同步。 */
@@ -811,49 +773,14 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         applyImeInsetSafe();   /* 底栏占的高度变了，surface 缩进要跟着变 */
     }
 
-    private TextView hudButton(String text, String desc, int gravity,
-                               int marginX, int marginY,
-                               View.OnClickListener click) {
-        TextView b = new TextView(this);
-        b.setText(text);
-        b.setContentDescription(desc);
-        b.setTextColor(0xFFFFFFFF);
-        b.setBackgroundColor(0xCC11111B);
-        int pad = dp(10);
-        b.setPadding(pad * 2, pad, pad * 2, pad);
-        b.setAlpha(0.85f);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT);
-        lp.gravity = gravity;
-        lp.leftMargin = marginX;
-        lp.rightMargin = marginX;
-        lp.topMargin = marginY;
-        lp.bottomMargin = marginY;
-        b.setLayoutParams(lp);
-        if (click != null) b.setOnClickListener(click);
-        return b;
-    }
-
-    private void sendHudKey(int scanCode) {
-        if (id < 0) return;
-        AwlClient.input(id, KEY, scanCode, 0, 0, 1, 0, 0);
-        AwlClient.input(id, KEY, scanCode, 0, 0, 0, 0, 0);
-        Log.i(TAG, "win " + id + ": hud key " + scanCode);
-    }
-
-    private void toggleHudIme() {
+    /** 切换系统软键盘（额外按键栏的 ⌨ 键）。 */
+    private void toggleIme() {
         if (imeWanted) {
             onImeHide();
         } else {
             imeWanted = true;
             tryShowIme();
         }
-    }
-
-    private void toggleHud() {
-        hudVisible = !hudVisible;
-        if (hudRoot != null) hudRoot.setVisibility(hudVisible ? View.VISIBLE : View.GONE);
     }
 
     /* Immersive fullscreen: hide status bar + navigation bar, swipe-revealed
@@ -1923,14 +1850,12 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         /*
-         * The HUD buttons float above the SurfaceView, so they get first
-         * refusal on every touch. Without this the forwarding below consumed
-         * every event unconditionally and the buttons drew but never fired —
-         * the tap reached the window yet produced no click and no client input.
+         * 额外按键栏 / 虚拟键盘浮在 SurfaceView 之上，它们要先得到拒绝触摸的机会。
+         * 没有这一下，下面的转发会无条件吃掉每个事件 —— 覆盖层画出来了却永远不触发，
+         * 点按既到不了按键也到不了客户端。
          *
-         * super.dispatchTouchEvent() only returns true when a child (a HUD
-         * TextView) actually handled the event; an empty area returns false
-         * and falls through to the client input path unchanged.
+         * super.dispatchTouchEvent() 只在某个子 view（按键栏按钮 / 虚拟键盘）真的
+         * 处理了该事件时返回 true；空区域返回 false，原样落到客户端输入路径。
          */
         if (super.dispatchTouchEvent(ev))
             return true;

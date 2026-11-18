@@ -33,6 +33,12 @@
         <item>Direct (physical event nodes)</item>
     </string-array>
 
+    <!-- 自定义额外按键栏布局的校验提示 -->
+    <string name="extra_keys_layout_empty">Empty (the built-in default will be used)</string>
+    <string name="extra_keys_layout_no_rows">No rows defined</string>
+    <string name="extra_keys_layout_invalid">Invalid: %1$s</string>
+    <string name="extra_keys_layout_json_error">JSON parse error</string>
+
     <!-- 设置通知（anland5 设置） -->
     <string name="notification_channel_name">Anland</string>
     <string name="notification_title">Anland</string>

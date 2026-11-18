@@ -368,12 +368,17 @@ public class WlSettingsActivity extends Activity {
                         checkedId == 9 ? 1 : checkedId == 10 ? 2 : 0).apply());
         root.addView(extraRg);
 
+        /* 沉浸式底栏：浮在画面上、不占用屏幕空间（默认开） */
         android.widget.Switch extraFloatSw = new android.widget.Switch(this);
         extraFloatSw.setText(R.string.extra_keys_floating);
-        extraFloatSw.setChecked(anland.getBoolean("extra_keys_floating", false));
+        extraFloatSw.setChecked(anland.getBoolean("extra_keys_floating", true));
         extraFloatSw.setOnCheckedChangeListener((b, on) ->
                 anland.edit().putBoolean("extra_keys_floating", on).apply());
         root.addView(extraFloatSw);
+
+        /* 底栏透明度（默认 60% = 半透明） */
+        root.addView(touchpadSlider(anland, R.string.extra_keys_opacity,
+                "extra_keys_opacity", 10f, 100f, 60f, v -> String.format("%.0f%%", v)));
 
         android.widget.Button layoutBtn = new android.widget.Button(this);
         layoutBtn.setText(R.string.extra_keys_layout);
@@ -554,7 +559,8 @@ public class WlSettingsActivity extends Activity {
                 .setPositiveButton(android.R.string.ok, (d, w) -> {
                     String json = et.getText().toString();
                     if (!json.trim().isEmpty()) {
-                        String err = com.anlandnext.awl.ui.ExtraKeysBar.validateLayout(json);
+                        CharSequence err = com.anlandnext.awl.ui.ExtraKeysBar
+                                .validateLayout(this, json);
                         if (err != null) {
                             android.widget.Toast.makeText(this, err,
                                     android.widget.Toast.LENGTH_LONG).show();

@@ -3,6 +3,8 @@ package com.anlandnext.awl.ui;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+
+import com.anlandnext.awl.R;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
@@ -56,10 +58,12 @@ public class ExtraKeysBar extends GridLayout {
     private static final int BG_COLOR = 0x00000000;
     private static final int ACTIVE_BG_COLOR = 0xFF7F7F7F;
 
-    // Bar backdrop: nearly opaque in the default (display-resizing) mode; more
-    // translucent in floating mode so the desktop shows through behind the keys.
-    private static final int BAR_BG_COLOR = 0xCC000000;
-    private static final int BAR_BG_FLOATING_COLOR = 0x99000000;
+    // 底栏底色：默认 60% 半透明黑。实际透明度用 setOpacity() 调。
+    private static final int BAR_BG_COLOR = 0x99000000;
+    /* 透明度下限：再低按键就点不到了（完全透明时看不见但仍占触摸区）。 */
+    private static final int MIN_OPACITY_PERCENT = 10;
+    private static final int MAX_OPACITY_PERCENT = 100;
+    private static final int DEFAULT_OPACITY_PERCENT = 60;
 
     private static final long REPEAT_DELAY_MS = 80;
 
@@ -204,12 +208,15 @@ public class ExtraKeysBar extends GridLayout {
     public int getRowCount() { return mRows; }
 
     /**
-     * Switch the bar backdrop between the default (nearly opaque) and floating
-     * (translucent) appearance. In floating mode the bar overlays the display
-     * instead of compressing it, so the desktop should remain partly visible.
+     * 底栏透明度（百分比，10..100，默认 60 = 半透明）。
+     *
+     * <p>底色始终是黑，只改 alpha —— 按键文字是白色的，底太亮会看不清。
+     * 「沉浸式」与否（是否压缩画面）由宿主决定，本类只管外观。
      */
-    public void setFloating(boolean floating) {
-        setBackgroundColor(floating ? BAR_BG_FLOATING_COLOR : BAR_BG_COLOR);
+    public void setOpacity(int percent) {
+        int clamped = Math.max(MIN_OPACITY_PERCENT, Math.min(MAX_OPACITY_PERCENT, percent));
+        int alpha = Math.round(clamped * 255 / 100f);
+        setBackgroundColor((alpha << 24) | 0x000000);
     }
 
     /** The editable default layout template (also used by SettingsActivity). */
@@ -220,16 +227,20 @@ public class ExtraKeysBar extends GridLayout {
      * a short human-readable error message. Used by SettingsActivity to give the
      * user inline feedback without building a view.
      */
-    public static String validateLayout(String json) {
+    /**
+     * 校验序列化布局。返回 null 表示可用，否则返回给用户看的提示（已本地化）。
+     */
+    public static CharSequence validateLayout(Context ctx, String json) {
         if (json == null || json.trim().isEmpty())
-            return "Empty (the built-in default will be used)";
+            return ctx.getString(R.string.extra_keys_layout_empty);
         try {
             Key[][] rows = parseLayout(json);
-            if (rows.length == 0) return "No rows defined";
+            if (rows.length == 0) return ctx.getString(R.string.extra_keys_layout_no_rows);
             return null;
         } catch (JSONException e) {
             String msg = e.getMessage();
-            return "Invalid: " + (msg != null ? msg : "JSON parse error");
+            return ctx.getString(R.string.extra_keys_layout_invalid,
+                    msg != null ? msg : ctx.getString(R.string.extra_keys_layout_json_error));
         }
     }
 

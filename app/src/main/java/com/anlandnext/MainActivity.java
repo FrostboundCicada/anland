@@ -138,7 +138,7 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView st = new TextView(this);
-        st.setText(w.attached ? "Attached" : "Detached");
+        st.setText(w.attached ? R.string.state_attached : R.string.state_detached);
         st.setTextSize(13);
         st.setTextColor(w.attached ? Color.rgb(0, 128, 0) : Color.rgb(160, 96, 0));
         r.addView(st);

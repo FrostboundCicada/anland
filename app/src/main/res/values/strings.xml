@@ -14,6 +14,8 @@
     <string name="title_none">(none)</string>
     <string name="state_attached_foreground">Attached (foreground)</string>
     <string name="state_detached_kept">Detached (kept alive)</string>
+    <string name="state_attached">Attached</string>
+    <string name="state_detached">Detached</string>
     <string name="dialog_ok">OK</string>
 
     <!-- WlSettingsActivity -->
@@ -40,7 +42,8 @@
     <string name="extra_keys_always">Always show</string>
     <string name="extra_keys_never">Never show</string>
     <string name="extra_keys_with_ime">Show with the soft keyboard</string>
-    <string name="extra_keys_floating">Floating bar (translucent, overlays the window)</string>
+    <string name="extra_keys_floating">Immersive bar (floats over the window, takes no screen space)</string>
+    <string name="extra_keys_opacity">Bar opacity</string>
     <string name="extra_keys_layout">Custom keys layout…</string>
     <string name="extra_keys_layout_default">Reset to default</string>
     <string name="extra_keys_layout_hint">JSON, same shape as the built-in layout. Empty = use the default.</string>

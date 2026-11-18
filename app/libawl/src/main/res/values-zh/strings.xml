@@ -19,4 +19,28 @@
     <string name="notification_channel_name">Anland</string>
     <string name="notification_title">Anland</string>
     <string name="notification_text">点按打开设置</string>
+
+    <!-- KeyCodeMapper：可绑定的硬件键名 -->
+    <string name="key_volume_up">音量加</string>
+    <string name="key_volume_down">音量减</string>
+    <string name="key_volume_mute">音量静音</string>
+    <string name="key_power">电源</string>
+    <string name="key_camera">相机</string>
+    <string name="key_headset_hook">耳机接听</string>
+    <string name="key_media_play_pause">播放/暂停</string>
+    <string name="key_media_next">下一曲</string>
+    <string name="key_media_previous">上一曲</string>
+    <string name="key_brightness_up">亮度加</string>
+    <string name="key_brightness_down">亮度减</string>
+    <string name="key_home">主页</string>
+    <string name="key_back">返回</string>
+    <string name="keycode_unknown">键码 %1$d</string>
+    <string name="scancode_unknown">扫描码 %1$d</string>
+    <string name="status_current_none">当前：无</string>
+
+    <!-- 自定义额外按键栏布局的校验提示 -->
+    <string name="extra_keys_layout_empty">空的（将使用内置默认布局）</string>
+    <string name="extra_keys_layout_no_rows">没有定义任何行</string>
+    <string name="extra_keys_layout_invalid">无效：%1$s</string>
+    <string name="extra_keys_layout_json_error">JSON 解析错误</string>
 </resources>
