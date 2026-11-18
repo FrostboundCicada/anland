@@ -48,6 +48,7 @@ import com.anlandnext.awl.immersive.ImmersiveMode;
 import com.anlandnext.awl.immersive.OplusRefreshRateLease;
 import com.anlandnext.awl.immersive.Touchpad;
 import com.anlandnext.awl.ui.ExtraKeysBar;
+import com.anlandnext.awl.ui.KeyCodeMapper;
 import com.anlandnext.awl.ui.KeyResolver;
 import com.anlandnext.awl.ui.VirtualKeyboardView;
 
@@ -2027,7 +2028,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
             return super.dispatchKeyEvent(ev);
         if (kc == KeyEvent.KEYCODE_DEL && imeWanted) {
             if (ev.getAction() == KeyEvent.ACTION_DOWN) {
-                int bs = ev.getScanCode() != 0 ? ev.getScanCode() : fallbackSc(kc);
+                int bs = ev.getScanCode() != 0 ? ev.getScanCode() : imeScanCode(kc);
                 if (bs > 0) {
                     AwlClient.input(id, KEY, bs, 0, 0, 1, 0, ev.getMetaState());
                     AwlClient.input(id, KEY, bs, 0, 0, 0, 0, 0);
@@ -2038,7 +2039,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         if (ev.getAction() == KeyEvent.ACTION_DOWN && ev.getRepeatCount() > 0)
             return true;   /* synthetic repeat — swallow (see above) */
         int sc = ev.getScanCode();
-        if (sc == 0) sc = fallbackSc(kc);
+        if (sc == 0) sc = imeScanCode(kc);
         if (sc > 0) {
             AwlClient.input(id, KEY, sc, 0, 0,
                            ev.getAction() == KeyEvent.ACTION_DOWN ? 1 : 0, 0,
@@ -2048,7 +2049,22 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         return super.dispatchKeyEvent(ev);
     }
 
-    /** IME-synthesized key (scanCode=0) → evdev code (matches the embedded keymap) */
+    /**
+     * 软键盘（IME 合成）按键的 evdev 码。
+     *
+     * <p>IME 合成出来的 KeyEvent 一定 {@code scanCode == 0}（实测 Gboard 发
+     * KEYCODE_A 时 sc=0、KEYCODE_H 时 sc=0），所以必须自己映射。先用
+     * {@link KeyCodeMapper} 的完整表（字母/数字/符号/F 键都在里面），再用
+     * fallbackSc 兜住它没收录的几个键。
+     *
+     * <p>之前只查 fallbackSc（15 个键），字母数字全是 0 → 一个键都发不出去，
+     * 表现就是「软键盘打了字，桌面什么都没上」。
+     */
+    private static int imeScanCode(int keyCode) {
+        int sc = KeyCodeMapper.getScanCode(keyCode);
+        return sc > 0 ? sc : fallbackSc(keyCode);
+    }
+
     private static int fallbackSc(int keyCode) {
         switch (keyCode) {
         case KeyEvent.KEYCODE_ENTER:
