@@ -222,6 +222,19 @@ add_custom_command(
           ${AWL_GENERATED}/text-input-unstable-v3-protocol.c
   DEPENDS ${TI3_XML})
 
+# input-method v2 protocol codegen (container IME bridging, see awl_im.c)
+set(IM2_XML ${CMAKE_CURRENT_SOURCE_DIR}/protocols/input-method-unstable-v2.xml)
+add_custom_command(
+  OUTPUT ${AWL_GENERATED}/input-method-unstable-v2-server-protocol.h
+  COMMAND ${WAYLAND_SCANNER} server-header ${IM2_XML}
+          ${AWL_GENERATED}/input-method-unstable-v2-server-protocol.h
+  DEPENDS ${IM2_XML})
+add_custom_command(
+  OUTPUT ${AWL_GENERATED}/input-method-unstable-v2-protocol.c
+  COMMAND ${WAYLAND_SCANNER} private-code ${IM2_XML}
+          ${AWL_GENERATED}/input-method-unstable-v2-protocol.c
+  DEPENDS ${IM2_XML})
+
 add_library(wayland-server-static STATIC
   ${WAYLAND_SRC}/src/wayland-server.c
   ${WAYLAND_SRC}/src/wayland-shm.c
@@ -314,6 +327,7 @@ add_executable(waylandbridge
   awl_dmabuf.c
   awl_input.c
   awl_ime.c
+  awl_im.c
   awl_subsurface.c
   awl_data_device.c
   awl_viewport.c
@@ -347,6 +361,8 @@ add_executable(waylandbridge
   ${AWL_GENERATED}/text-input-unstable-v1-server-protocol.h
   ${AWL_GENERATED}/text-input-unstable-v3-protocol.c
   ${AWL_GENERATED}/text-input-unstable-v3-server-protocol.h
+  ${AWL_GENERATED}/input-method-unstable-v2-protocol.c
+  ${AWL_GENERATED}/input-method-unstable-v2-server-protocol.h
   # adaptation layer
   awl_ahb.cpp
   awl_gl.cpp

@@ -549,6 +549,17 @@ void awl_surface_buffer_gone(struct wl_resource* buffer_res);
 /* awl_input.c — wl_seat input (per-event literal translation: Android is the
  * routing authority, events carry the window id; event types in awl.h) */
 void awl_input_setup(void);          /* creates the seat global (called by server_start) */
+
+/* ---- awl_im.c — zwp_input_method_v2（容器内输入法） ---- */
+/* 当前是否有输入法抓取键盘（grab 期间按键改投给输入法，不投给应用） */
+int awl_im_grabbed(void);
+/* text_input 获得/失去焦点时调用 */
+void awl_im_setup(void);            /* 创建 manager 全局（server_start） */
+void awl_im_send_key(uint32_t code, uint32_t state, uint32_t meta);  /* grab 期间改投 */
+void awl_im_activate(void);
+void awl_im_deactivate(void);
+/* Android meta → xkb modifier mask（与 awl_input.c 的按键路径共用） */
+void meta_to_masks(uint32_t meta, uint32_t* dep, uint32_t* lck);
 /* Cursor hooks (set_cursor state lives in awl_input.c, own g_cursor_lock;
  * order rwl → g_cursor_lock → ev_lock):
  *  - surface_gone: caller holds rwl.wr (awl_surface.c destroy path). Drops

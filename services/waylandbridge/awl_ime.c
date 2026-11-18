@@ -95,6 +95,9 @@ static pthread_mutex_t g_ime_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* keyboard focus snapshot (written by awl_input.c tr_kbd_enter/leave; read at get_text_input / v3 commit) */
 static struct wl_client* g_focus_client;
+static struct awl_ime_obj* g_cur_ti;   /* 当前 enabled+entered 的 text_input（供 input_method 转发） */
+static void ime_im_activated(void);      /* 定义在文件尾部 */
+static void ime_im_deactivated(void);
 static uint64_t g_focus_win;
 
 void awl_ime_set_focus(struct wl_client* c, uint64_t win) {
@@ -230,6 +233,7 @@ static void ti3_disable(struct wl_client* c, struct wl_resource* res) {
     if (!o) return;
     ti3_reset_pending(o);
     o->pend_enabled = false;
+    if (g_cur_ti == o) g_cur_ti = NULL;   /* enabled 仍按 v3 约定在 commit 生效 */
 }
 
 /* set_* are no-ops unless an enable is pending (kwin) */
@@ -614,6 +618,7 @@ void awl_ime_focus_leave(uint64_t win) {
         o->entered = false;
         if (o->enabled) push_hide(o);
         if (o->ver == 3) o->surface_res = NULL;
+        if (g_cur_ti == o) g_cur_ti = NULL;
     }
 }
 
@@ -701,6 +706,10 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
         wl_client_flush(c);
         pthread_mutex_unlock(&ts->ev_lock);
         delivered = 1;
+        if (g_cur_ti != o) {          /* 供 input_method_v2 转发 */
+            g_cur_ti = o;
+            ime_im_activated();
+        }
     }
     pthread_rwlock_unlock(&g_srv.rwl);
 
@@ -708,6 +717,10 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
      * wl_keyboard）→ 把 ASCII 文本降级成按键。非 ASCII 会被跳过（见
      * awl_input_text_as_keys 的注释）。 */
     if (!delivered && op == AWL_IME_COMMIT) {
+        if (g_cur_ti) {               /* text_input 没了 → 通知输入法 deactivate */
+            g_cur_ti = NULL;
+            ime_im_deactivated();
+        }
         /* 每个窗口只提示一次：LOGI 在 release 里保留（LOGD 会被编译掉），
          * 而打字是每键一次，不节流会刷爆日志。binder 单向事务串行投递，
          * 这里最坏也只是多打一条。 */
@@ -719,6 +732,81 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
         }
         awl_input_text_as_keys(id, text);
     }
+}
+
+/* ================= input_method_v2 桥（容器内输入法，如 fcitx5） =================
+ *
+ * awl_im.c 实现 zwp_input_method_v2 的服务端。它需要知道「当前聚焦的
+ * text_input」才能把输入法的 commit/preedit/delete 转发过去。这里维护
+ * g_cur_ti：最近一次 delivered（enabled && entered）的那个 text_input。 */
+
+int awl_ime_im_commit(const char* text) {
+    pthread_rwlock_rdlock(&g_srv.rwl);
+    struct awl_ime_obj* t = g_cur_ti;
+    if (!t || !t->res) { pthread_rwlock_unlock(&g_srv.rwl); return 0; }
+    if (t->ver == 3) {
+        zwp_text_input_v3_send_commit_string(t->res, text);
+        zwp_text_input_v3_send_done(t->res, t->serial);
+    } else {
+        zwp_text_input_v1_send_commit_string(t->res, t->serial, text);
+    }
+    wl_client_flush(wl_resource_get_client(t->res));
+    pthread_rwlock_unlock(&g_srv.rwl);
+    return 1;
+}
+
+int awl_ime_im_preedit(const char* text, int32_t cb, int32_t ce) {
+    pthread_rwlock_rdlock(&g_srv.rwl);
+    struct awl_ime_obj* t = g_cur_ti;
+    if (!t || !t->res) { pthread_rwlock_unlock(&g_srv.rwl); return 0; }
+    if (t->ver == 3) {
+        zwp_text_input_v3_send_preedit_string(t->res, text, cb, ce);
+        zwp_text_input_v3_send_done(t->res, t->serial);
+    } else {
+        zwp_text_input_v1_send_preedit_cursor(t->res, cb);
+        zwp_text_input_v1_send_preedit_string(t->res, t->serial, text, "");
+    }
+    wl_client_flush(wl_resource_get_client(t->res));
+    pthread_rwlock_unlock(&g_srv.rwl);
+    return 1;
+}
+
+int awl_ime_im_delete(uint32_t before, uint32_t after) {
+    pthread_rwlock_rdlock(&g_srv.rwl);
+    struct awl_ime_obj* t = g_cur_ti;
+    if (!t || !t->res) { pthread_rwlock_unlock(&g_srv.rwl); return 0; }
+    if (t->ver == 3) {
+        zwp_text_input_v3_send_delete_surrounding_text(t->res, before, after);
+        zwp_text_input_v3_send_done(t->res, t->serial);
+    } else {
+        zwp_text_input_v1_send_delete_surrounding_text(t->res, -(int32_t)before,
+                                                       before + after);
+        zwp_text_input_v1_send_commit_string(t->res, t->serial, "");
+    }
+    wl_client_flush(wl_resource_get_client(t->res));
+    pthread_rwlock_unlock(&g_srv.rwl);
+    return 1;
+}
+
+int awl_ime_im_state(const char** surrounding, uint32_t* hint, uint32_t* purpose) {
+    pthread_rwlock_rdlock(&g_srv.rwl);
+    struct awl_ime_obj* t = g_cur_ti;
+    if (!t) { pthread_rwlock_unlock(&g_srv.rwl); return 0; }
+    *surrounding = t->text ? (const char*)t->text : "";
+    *hint = t->hint;
+    *purpose = t->purpose;
+    pthread_rwlock_unlock(&g_srv.rwl);
+    return 1;
+}
+
+/* text_input 获得焦点 → 通知 input_method（activate + 当前状态） */
+static void ime_im_activated(void) {
+    if (g_cur_ti) awl_im_activate();
+}
+
+/* text_input 失焦/被禁用 → deactivate */
+static void ime_im_deactivated(void) {
+    awl_im_deactivate();
 }
 
 /* ---------------- setup ---------------- */

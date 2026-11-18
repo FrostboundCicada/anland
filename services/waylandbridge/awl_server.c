@@ -392,6 +392,7 @@ int awl_server_start(int listen_fd, const awl_display_info_t* info,
     awl_input_setup();        /* wl_seat (input object table + passthrough translation) */
     awl_datadev_setup();      /* wl_data_device_manager v3 (selection+DnD) */
     awl_ime_setup();          /* zwp_text_input v1+v3 (Android IME bridge) */
+    awl_im_setup();           /* zwp_input_method_v2 (container IME, e.g. fcitx5) */
     awl_viewport_setup();     /* wp_viewporter + fractional-scale (#31 zoom) */
     awl_xwayland_setup();     /* xwayland_shell_v1 (Xwayland rootless, #32) */
     awl_idle_setup();         /* zwp_idle_inhibit_manager_v1 (keep-screen-on, C_KEEPON) */

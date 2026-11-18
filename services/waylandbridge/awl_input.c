@@ -718,7 +718,7 @@ static void tr_ptr_axis(uint64_t win, float v, float h, uint32_t finger,
 #define AM_NUM    0x00200000u
 #define AM_SCROLL 0x00400000u
 
-static void meta_to_masks(uint32_t meta, uint32_t* dep, uint32_t* lck) {
+void meta_to_masks(uint32_t meta, uint32_t* dep, uint32_t* lck) {
     uint32_t d = 0, l = 0;
     if (meta & AM_SHIFT)  d |= 1u << 0;
     if (meta & AM_CTRL)   d |= 1u << 2;
@@ -787,6 +787,11 @@ static void tr_kbd_leave(uint64_t win) {
 
 /* Key: update the bitmap/modifiers (consistent under the lock) → send key + modifiers directly */
 static void tr_key(uint64_t win, uint32_t code, uint32_t state, uint32_t meta) {
+    /* 输入法抓走键盘期间，按键改投给输入法（由它决定上屏或吞掉） */
+    if (awl_im_grabbed()) {
+        awl_im_send_key(code, state, meta);
+        return;
+    }
     uint32_t dep = 0, lck = 0;
     int mods_changed = 0;
     pthread_mutex_lock(&g_input_lock);
