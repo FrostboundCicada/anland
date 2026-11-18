@@ -1094,10 +1094,26 @@ static void pointer_set_cursor(struct wl_client* c, struct wl_resource* res,
     LOGD("set_cursor win=%llu surface=%llu hot=%d,%d", (unsigned long long)win,
          (unsigned long long)(s ? s->id : 0), hot_x, hot_y);
     if (!was_set) {
-        if (g_srv.cbs.pointer_cursor)
-            g_srv.cbs.pointer_cursor(g_srv.cbs.user, win, 1);
-        LOGI("window %llu: client cursor %s → android pointer hidden",
-             (unsigned long long)win, s ? "surface" : "NULL (invisible)");
+        /*
+         * set_cursor(NULL) means the client draws no cursor at all. Hiding the
+         * Android pointer here too would leave the user with nothing: the cursor
+         * layer is only drawn when the surface carries a real buffer
+         * (awl_pointer_cursor_layer requires w,h > 0.5), so an unset or
+         * unbacked cursor surface shows nothing while the system pointer is
+         * gone. Keep the Android pointer in that case.
+         *
+         * When the client DID supply a surface, the hide is deferred to
+         * awl_input_cursor_buffer_ready() — hiding at set_cursor time is what
+         * produced a pointer-less screen whenever the client's cursor surface
+         * never got a usable buffer. */
+        if (s) {
+            LOGI("window %llu: client cursor surface set → android pointer hidden once it draws",
+                 (unsigned long long)win);
+        } else if (g_srv.cbs.pointer_cursor) {
+            g_srv.cbs.pointer_cursor(g_srv.cbs.user, win, 0);
+            LOGI("window %llu: client cursor NULL → android pointer kept",
+                 (unsigned long long)win);
+        }
     }
     cursor_dirty(win);   /* add / swap / remove the cursor layer */
 }
@@ -1141,6 +1157,46 @@ uint64_t awl_input_cursor_window(struct awl_surface* s) {
     uint64_t win = (g_cursor.set && g_cursor.surface == s) ? g_cursor.win : 0;
     pthread_mutex_unlock(&g_cursor_lock);
     return win;
+}
+
+/*
+ * A CURSOR-role surface committed with a real buffer → NOW hide the Android
+ * pointer.
+ *
+ * Deferred from pointer_set_cursor(): hiding there removed the system pointer
+ * the instant the client called set_cursor, even when its cursor surface never
+ * produced a usable buffer (the layer is only drawn at w,h > 0.5, see
+ * awl_pointer_cursor_layer). The visible result was a screen with no pointer at
+ * all. Hiding here — once the buffer actually exists — means an unbacked cursor
+ * surface leaves the Android pointer on screen instead of taking it away.
+ *
+ * Lock order rwl → g_cursor_lock → ev_lock (same as cursor_commit). The binder
+ * callback runs after the locks are dropped, matching cursor_restore().
+ *
+ * Called from awl_surface.c on a CURSOR-role commit that attached a buffer.
+ */
+void awl_input_cursor_buffer_ready(struct awl_surface* s) {
+    uint64_t win = 0;
+    int hide = 0;
+
+    pthread_mutex_lock(&g_cursor_lock);
+    if (g_cursor.set && g_cursor.surface == s) {
+        float w = 0, h = 0;
+        pthread_mutex_lock(&s->ev_lock);
+        awl_surface_logical_size(s, &w, &h);
+        pthread_mutex_unlock(&s->ev_lock);
+        if (w > 0.5f && h > 0.5f) {
+            hide = 1;
+            win = g_cursor.win;
+        }
+    }
+    pthread_mutex_unlock(&g_cursor_lock);
+
+    if (hide && g_srv.cbs.pointer_cursor) {
+        g_srv.cbs.pointer_cursor(g_srv.cbs.user, win, 1);
+        LOGI("window %llu: client cursor buffer ready → android pointer hidden",
+             (unsigned long long)win);
+    }
 }
 
 void awl_input_cursor_commit(struct awl_surface* s, int32_t off_x, int32_t off_y) {

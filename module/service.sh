@@ -19,6 +19,17 @@ case "$RT" in /*) ;; *) RT=/data/local/tmp/awl ;; esac
 
 start_daemon() {
   chmod 755 "$MODDIR/waylandbridge" 2>/dev/null
+  # 让 anland 窗口显示在解锁的亮屏上。
+  #
+  # 用户报的「下面一堆可选选项」是锁屏/AOD 的界面（时钟、日期、通知、
+  # 底部快捷入口）—— anland 窗口在锁屏后面，看到的其实是锁屏；锁屏上
+  # 也不会有鼠标指针，于是同时表现为「没有光标」。
+  #
+  # 常亮：USB 供电时保持屏幕唤醒。
+  # 解锁：wm dismiss-keyguard 只对没有设置锁屏密码的设备有效；设了密码
+  #       时它静默失败，不会把密码绕过去。
+  svc power stayon true 2>/dev/null
+  wm dismiss-keyguard 2>/dev/null || true
   # custom SELinux domain: relabel → exec transitions into awl_daemon
   # (module sepolicy.rule is applied by ksud before service stage)
   chcon u:object_r:awl_daemon_exec:s0 "$MODDIR/waylandbridge" 2>/dev/null

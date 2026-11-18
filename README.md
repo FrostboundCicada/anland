@@ -96,9 +96,18 @@ default `1`; applied when a window attaches):
 
 ## Requirements
 
+- **Android 14 (API 34) or newer.** The daemon calls
+  `ANativeWindow_readFromParcel`, an API 34 symbol, with no fallback. On
+  Android 13 it fails to load:
+  `CANNOT LINK EXECUTABLE ... cannot locate symbol "ANativeWindow_readFromParcel"`.
+  See [doc/ANDROID-VERSION-REQUIREMENTS.en.md](doc/ANDROID-VERSION-REQUIREMENTS.en.md).
 - A rooted arm64 device (SukiSU or KernelSU)
 - A Droidspaces Linux container
 - The host APK installed — windows attach through it, and audio requires it
+
+> The `droidspaces-lkm` KMI matrix lists Android 12/13 support, but that is the
+> **kernel module** side. anland6's user-space `waylandbridge` is a separate
+> matter and needs Android 14+.
 
 ## Install
 

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
+import android.content.Intent;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -11,6 +12,7 @@ import android.os.Parcel;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -33,6 +35,7 @@ import android.view.inputmethod.SurroundingText;
 import android.view.inputmethod.TextAttribute;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -531,6 +534,95 @@ public class AwlWindowActivity extends Activity {
         setContentView(root);
 
         setupFullscreen();   /* immersive */
+        addHud();            /* anland5 样式的悬浮控件（SUPER / ENTER / KB）*/
+    }
+
+    /* ================= HUD（对齐 anland5 的悬浮控件）=================
+     *
+     * anland5 的 consumer 在画面上叠一层悬浮控件：右侧中部一个 SUPER 手势球、
+     * 右下角 ENTER / KB、左下角设置。anland6 只有窗口本身 —— 触屏设备上既
+     * 没有实体回车键，也没有软键盘开关，这两样正是它缺的。
+     *
+     *   SUPER   点按：发送 Left Meta（evdev 125）；长按：收起/展开整排
+     *   ENTER   evdev 0x1c 的 press + release
+     *   KB      切换软键盘（imeWanted）
+     *
+     * 位置按 anland5 的横屏布局：右下 ENTER/KB，右侧中部 SUPER。
+     * 半透明、不抢焦点（不含焦点性），浮在客户端画面之上。 */
+    private FrameLayout hudRoot;
+    private boolean hudVisible = true;
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private void addHud() {
+        hudRoot = new FrameLayout(this);
+        hudRoot.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        /* 让点击穿过 HUD 的空区到达客户端画面 */
+        hudRoot.setClickable(false);
+
+        /* 右下：ENTER（下）与 KB（上），两者用 bottomMargin 错开 */
+        hudRoot.addView(hudButton("ENTER", "回车", Gravity.BOTTOM | Gravity.END,
+                dp(16), dp(20), v -> sendHudKey(0x1c)));
+        hudRoot.addView(hudButton("KB", "软键盘", Gravity.BOTTOM | Gravity.END,
+                dp(16), dp(84), v -> toggleHudIme()));
+
+        /* 右侧中部：SUPER —— 点按发 Left Meta，长按收起/展开整排 */
+        TextView sup = hudButton("SUPER", "Super：点按发送，长按收起", Gravity.CENTER_VERTICAL | Gravity.END,
+                dp(16), 0, null);
+        sup.setOnClickListener(v -> sendHudKey(125));
+        sup.setOnLongClickListener(v -> { toggleHud(); return true; });
+        hudRoot.addView(sup);
+
+        root.addView(hudRoot);
+    }
+
+    private TextView hudButton(String text, String desc, int gravity,
+                               int marginX, int marginY,
+                               View.OnClickListener click) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setContentDescription(desc);
+        b.setTextColor(0xFFFFFFFF);
+        b.setBackgroundColor(0xCC11111B);
+        int pad = dp(10);
+        b.setPadding(pad * 2, pad, pad * 2, pad);
+        b.setAlpha(0.85f);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity = gravity;
+        lp.leftMargin = marginX;
+        lp.rightMargin = marginX;
+        lp.topMargin = marginY;
+        lp.bottomMargin = marginY;
+        b.setLayoutParams(lp);
+        if (click != null) b.setOnClickListener(click);
+        return b;
+    }
+
+    private void sendHudKey(int scanCode) {
+        if (id < 0) return;
+        AwlClient.input(id, KEY, scanCode, 0, 0, 1, 0, 0);
+        AwlClient.input(id, KEY, scanCode, 0, 0, 0, 0, 0);
+        Log.i(TAG, "win " + id + ": hud key " + scanCode);
+    }
+
+    private void toggleHudIme() {
+        if (imeWanted) {
+            onImeHide();
+        } else {
+            imeWanted = true;
+            tryShowIme();
+        }
+    }
+
+    private void toggleHud() {
+        hudVisible = !hudVisible;
+        if (hudRoot != null) hudRoot.setVisibility(hudVisible ? View.VISIBLE : View.GONE);
     }
 
     /* Immersive fullscreen: hide status bar + navigation bar, swipe-revealed
@@ -1578,7 +1670,19 @@ public class AwlWindowActivity extends Activity {
      * handleMouseEvent. */
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (id < 0) return super.dispatchTouchEvent(ev);   /* awaiting */
+        /*
+         * The HUD buttons float above the SurfaceView, so they get first
+         * refusal on every touch. Without this the forwarding below consumed
+         * every event unconditionally and the buttons drew but never fired —
+         * the tap reached the window yet produced no click and no client input.
+         *
+         * super.dispatchTouchEvent() only returns true when a child (a HUD
+         * TextView) actually handled the event; an empty area returns false
+         * and falls through to the client input path unchanged.
+         */
+        if (super.dispatchTouchEvent(ev))
+            return true;
+        if (id < 0) return false;   /* awaiting */
         if (isMouse(ev)) {
             int cls = ev.getClassification();
             if (cls == CLS_TWO_FINGER_SWIPE) {

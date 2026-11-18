@@ -86,9 +86,16 @@ flowchart LR
 
 ## 环境要求
 
+- **Android 14（API 34）或更高。** 守护进程调用 `ANativeWindow_readFromParcel`
+  —— 这是 API 34 才引入的符号，代码里没有低版本回退。Android 13 上会加载失败：
+  `CANNOT LINK EXECUTABLE ... cannot locate symbol "ANativeWindow_readFromParcel"`。
+  详见 [doc/ANDROID-VERSION-REQUIREMENTS.zh-CN.md](doc/ANDROID-VERSION-REQUIREMENTS.zh-CN.md)。
 - 已 root 的 arm64 设备（SukiSU 或 KernelSU）
 - 一个 Droidspaces Linux 容器
 - 已安装宿主 APK——窗口经由它挂载，音频也依赖它
+
+> `droidspaces-lkm` 的 KMI 覆盖矩阵写着支持 Android 12/13，但那是**内核模块**
+> 那一侧。anland6 用户态的 `waylandbridge` 是另一回事，需要 Android 14+。
 
 ## 安装
 

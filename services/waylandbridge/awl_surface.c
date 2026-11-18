@@ -969,6 +969,11 @@ static void surface_commit(struct wl_client* client, struct wl_resource* res) {
      * (order g_cursor_lock → ev_lock) */
     if (s->role == AWL_ROLE_CURSOR && attached && (off_x || off_y))
         awl_input_cursor_commit(s, off_x, off_y);
+    /* A cursor surface that actually brought a buffer → the client will draw
+     * the pointer, so the Android system pointer can be hidden now. Deferred
+     * from set_cursor so an unbacked cursor surface leaves it on screen. */
+    if (s->role == AWL_ROLE_CURSOR && attached)
+        awl_input_cursor_buffer_ready(s);
 
         /* State application → child layer double-buffered positions take
      * effect + sync-latch cascade applies (KWin merge). Must come before

@@ -565,6 +565,9 @@ uint64_t awl_input_surface_gone(struct awl_surface* s);
 void awl_input_cursor_gone_notify(uint64_t win);
 uint64_t awl_input_cursor_window(struct awl_surface* s);   /* caller holds rwl (rd/wr) */
 void awl_input_cursor_commit(struct awl_surface* s, int32_t off_x, int32_t off_y);
+/* Cursor surface committed with a real buffer → hide the Android pointer
+ * (deferred from set_cursor; caller holds no lock, called on the commit path) */
+void awl_input_cursor_buffer_ready(struct awl_surface* s);
 
 /* Pointer-constraint hooks (zwp_pointer_constraints_v1 state lives in
  * awl_input.c under g_constr_lock — pure state sync, the input translation
