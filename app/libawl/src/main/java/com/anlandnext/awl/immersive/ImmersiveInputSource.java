@@ -35,9 +35,14 @@ enum ImmersiveInputSource {
         return "source=physical";
     }
 
-    /** 是否允许「未绑定按键」也能进入 —— 直接来源没有外部模块兜底，允许。 */
+    /**
+     * 是否允许「未绑定按键」也能进入。
+     *
+     * <p>直接来源必须绑键：helper 是靠这颗键结束会话的，没有它就没有按键级的
+     * 退出手段（只能靠电源键、心跳和杀进程）。5.x 也是这么要求的。
+     */
     boolean allowsUnboundToggle() {
-        return true;
+        return false;
     }
 
     static final String KEY_PREFERENCE = "immersive_input_source";
