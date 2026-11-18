@@ -60,6 +60,12 @@
     <string name="gesture_scale_label">Gesture magnitude</string>
     <string name="scroll_reverse">Reverse scroll direction</string>
     <string name="disable_multi_finger">Disable pinch and multi-finger gestures</string>
+
+    <!-- 屏幕方向（anland5 设置） -->
+    <string name="orientation_tip">Force screen orientation:</string>
+    <string name="orientation_default">Default (system)</string>
+    <string name="orientation_landscape">Force landscape</string>
+    <string name="orientation_portrait">Force portrait</string>
     <string name="immersive_bind">Bind immersive key</string>
     <string name="immersive_bind_listening">Press the key to bind…</string>
     <string name="immersive_current">Current: %1$s</string>

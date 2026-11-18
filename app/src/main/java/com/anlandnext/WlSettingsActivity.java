@@ -481,6 +481,37 @@ public class WlSettingsActivity extends Activity {
                 anland.edit().putBoolean("disable_multi_finger_gestures", on).apply());
         root.addView(disableMultiSw);
 
+        /* ---- 屏幕方向（anland5 设置）---- */
+        android.widget.Space gap9 = new android.widget.Space(this);
+        gap9.setMinimumHeight(64);
+        root.addView(gap9);
+
+        TextView orientationTip = new TextView(this);
+        orientationTip.setText(R.string.orientation_tip);
+        root.addView(orientationTip);
+
+        RadioGroup orientationRg = new RadioGroup(this);
+        RadioButton oriDefault = new RadioButton(this);
+        oriDefault.setId(11);
+        oriDefault.setText(R.string.orientation_default);
+        RadioButton oriLandscape = new RadioButton(this);
+        oriLandscape.setId(12);
+        oriLandscape.setText(R.string.orientation_landscape);
+        RadioButton oriPortrait = new RadioButton(this);
+        oriPortrait.setId(13);
+        oriPortrait.setText(R.string.orientation_portrait);
+        orientationRg.addView(oriDefault);
+        orientationRg.addView(oriLandscape);
+        orientationRg.addView(oriPortrait);
+        String ori = anland.getString("screen_orientation", "default");
+        ("portrait".equals(ori) ? oriPortrait : "landscape".equals(ori) ? oriLandscape : oriDefault)
+                .setChecked(true);
+        orientationRg.setOnCheckedChangeListener((g, checkedId) ->
+                anland.edit().putString("screen_orientation",
+                        checkedId == 13 ? "portrait" : checkedId == 12 ? "landscape" : "default")
+                        .apply());
+        root.addView(orientationRg);
+
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(root);

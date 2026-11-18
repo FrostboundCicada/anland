@@ -582,6 +582,24 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         addExtraKeysBar();   /* anland5 样式的底部额外按键栏 */
         addVirtualKeyboard();/* anland5 样式的浮动虚拟键盘 */
         immersive = new ImmersiveInputController(this);   /* anland5 沉浸式（root 抓 evdev）*/
+        applyOrientation();   /* anland5 设置：强制横/竖屏 */
+    }
+
+    /** 屏幕方向（anland5 的 screen_orientation：default / landscape / portrait）。 */
+    private void applyOrientation() {
+        String mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getString("screen_orientation", "default");
+        switch (mode) {
+            case "landscape":
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                break;
+            case "portrait":
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+                break;
+            default:
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                break;
+        }
     }
 
     /* ================= HUD（对齐 anland5 的悬浮控件）=================
@@ -898,6 +916,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     protected void onResume() {
         super.onResume();
         setupFullscreen();   /* the system may reset immersive mode */
+        applyOrientation();  /* 用户在设置里改了方向 */
         Awl.registerCallback(winEvents);
         Awl.acquire();   /* process event subscription (sibling windows dying while this one is foreground) */
         if (clipMgr != null)
