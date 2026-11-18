@@ -789,15 +789,22 @@ int awl_ime_im_delete(uint32_t before, uint32_t after) {
     return 1;
 }
 
-int awl_ime_im_state(const char** surrounding, uint32_t* hint, uint32_t* purpose) {
-    pthread_rwlock_rdlock(&g_srv.rwl);
+/* 不取锁版本：调用方已持 rwl(rd)（awl_im.c 的 activate/notify 在锁内调它，
+ * 再包一层读锁会在有写者等待时死锁） */
+int awl_ime_im_state_unlocked(const char** surrounding, uint32_t* hint, uint32_t* purpose) {
     struct awl_ime_obj* t = g_cur_ti;
-    if (!t) { pthread_rwlock_unlock(&g_srv.rwl); return 0; }
+    if (!t) return 0;
     *surrounding = t->text ? (const char*)t->text : "";
     *hint = t->hint;
     *purpose = t->purpose;
-    pthread_rwlock_unlock(&g_srv.rwl);
     return 1;
+}
+
+int awl_ime_im_state(const char** surrounding, uint32_t* hint, uint32_t* purpose) {
+    pthread_rwlock_rdlock(&g_srv.rwl);
+    int r = awl_ime_im_state_unlocked(surrounding, hint, purpose);
+    pthread_rwlock_unlock(&g_srv.rwl);
+    return r;
 }
 
 /* text_input 获得焦点 → 通知 input_method（activate + 当前状态） */

@@ -31,7 +31,7 @@ extern int awl_ime_im_commit(const char* text);            /* 1 = 已送达 */
 extern int awl_ime_im_preedit(const char* text, int32_t cb, int32_t ce);
 extern int awl_ime_im_delete(uint32_t before, uint32_t after);
 /* 当前 text_input 的 surrounding_text / content_type（激活时发给输入法） */
-extern int awl_ime_im_state(const char** surrounding, uint32_t* hint, uint32_t* purpose);
+extern int awl_ime_im_state_unlocked(const char** surrounding, uint32_t* hint, uint32_t* purpose);
 extern void awl_ime_im_activate(void);   /* text_input 获得焦点 → 通知本模块 */
 extern void awl_ime_im_deactivate(void);
 
@@ -86,7 +86,7 @@ static void im_activate(struct awl_im_obj* o) {
     zwp_input_method_v2_send_activate(o->res);
     /* 激活后必须跟上 text_input 的当前状态（若它支持） */
     const char* surrounding = NULL; uint32_t hint = 0, purpose = 0;
-    if (awl_ime_im_state(&surrounding, &hint, &purpose) && surrounding)
+    if (awl_ime_im_state_unlocked(&surrounding, &hint, &purpose) && surrounding)
         zwp_input_method_v2_send_surrounding_text(o->res, surrounding, 0, 0);
     zwp_input_method_v2_send_content_type(o->res, hint, purpose);
     im_send_done(o);
@@ -106,7 +106,7 @@ void awl_im_notify_state(void) {
     wl_list_for_each(o, &g_ims, link) {
         if (!o->active || !o->res) continue;
         const char* surrounding = NULL; uint32_t hint = 0, purpose = 0;
-        if (awl_ime_im_state(&surrounding, &hint, &purpose) && surrounding)
+        if (awl_ime_im_state_unlocked(&surrounding, &hint, &purpose) && surrounding)
             zwp_input_method_v2_send_surrounding_text(o->res, surrounding, 0, 0);
         zwp_input_method_v2_send_content_type(o->res, hint, purpose);
         zwp_input_method_v2_send_text_change_cause(o->res, 0 /* ZWP_INPUT_METHOD_V2_CHANGE_CAUSE_INPUT_METHOD */);
