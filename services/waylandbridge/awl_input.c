@@ -886,8 +886,11 @@ void awl_input_text_as_keys(uint64_t id, const char* text) {
         tr_key(id, hit->code, 0, 0);
         if (hit->shift) tr_key(id, 42, 0, 0);
     }
-    LOGD("text_as_keys id=%llu len=%zu skipped=%zu",
-         (unsigned long long)id, strlen(text), skipped);
+    /* 只在真的跳过字符时提示（LOGI 在 release 里保留）：中文等无 evdev 码
+     * 的字符会被丢弃，不提示就只能看到「没反应」。 */
+    if (skipped)
+        LOGI("text_as_keys id=%llu len=%zu skipped=%zu",
+             (unsigned long long)id, strlen(text), skipped);
 }
 
 /* Touch point grab table operations (g_input_lock; sid=0 = free slot — surface ids start at 1) */

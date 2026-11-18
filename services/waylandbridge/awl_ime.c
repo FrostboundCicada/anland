@@ -708,8 +708,15 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
      * wl_keyboard）→ 把 ASCII 文本降级成按键。非 ASCII 会被跳过（见
      * awl_input_text_as_keys 的注释）。 */
     if (!delivered && op == AWL_IME_COMMIT) {
-        LOGD("ime_text: no enabled text_input for win=%llu, %zu bytes → keys",
-             (unsigned long long)id, strlen(text));
+        /* 每个窗口只提示一次：LOGI 在 release 里保留（LOGD 会被编译掉），
+         * 而打字是每键一次，不节流会刷爆日志。binder 单向事务串行投递，
+         * 这里最坏也只是多打一条。 */
+        static uint64_t fallback_logged;
+        if (fallback_logged != id) {
+            fallback_logged = id;
+            LOGI("ime_text win=%llu: no enabled text_input, %zu bytes → keys",
+                 (unsigned long long)id, strlen(text));
+        }
         awl_input_text_as_keys(id, text);
     }
 }
