@@ -638,7 +638,7 @@ void awl_ime_surface_gone(struct awl_surface* s) {
 
 void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t b) {
     if (!text) text = "";
-    int delivered = 0;
+    int delivered = 0, activate_now = 0, deactivate_now = 0;
     pthread_rwlock_rdlock(&g_srv.rwl);
     struct awl_surface* s = awl_surface_by_id(id);
     if (!s || !s->resource) {
@@ -706,21 +706,22 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
         wl_client_flush(c);
         pthread_mutex_unlock(&ts->ev_lock);
         delivered = 1;
-        if (g_cur_ti != o) {          /* 供 input_method_v2 转发 */
-            g_cur_ti = o;
-            ime_im_activated();
-        }
+        if (g_cur_ti != o) { g_cur_ti = o; activate_now = 1; }
+    }
+    if (!delivered && op == AWL_IME_COMMIT && g_cur_ti) {
+        g_cur_ti = NULL;              /* text_input 没了 → 通知输入法 deactivate */
+        deactivate_now = 1;
     }
     pthread_rwlock_unlock(&g_srv.rwl);
+
+    /* 递归读锁在有写者等待时会死锁 —— 这两个调用必须放在锁外 */
+    if (activate_now) ime_im_activated();
+    if (deactivate_now) ime_im_deactivated();
 
     /* 没有可用的 text_input（终端类应用不实现 zwp_text_input_v3，只吃
      * wl_keyboard）→ 把 ASCII 文本降级成按键。非 ASCII 会被跳过（见
      * awl_input_text_as_keys 的注释）。 */
     if (!delivered && op == AWL_IME_COMMIT) {
-        if (g_cur_ti) {               /* text_input 没了 → 通知输入法 deactivate */
-            g_cur_ti = NULL;
-            ime_im_deactivated();
-        }
         /* 每个窗口只提示一次：LOGI 在 release 里保留（LOGD 会被编译掉），
          * 而打字是每键一次，不节流会刷爆日志。binder 单向事务串行投递，
          * 这里最坏也只是多打一条。 */

@@ -174,7 +174,8 @@ static void im_commit(struct wl_client* c, struct wl_resource* res, uint32_t ser
     struct awl_im_obj* o = wl_resource_get_user_data(res);
     if (!o) return;
 
-    pthread_rwlock_rdlock(&g_srv.rwl);
+    /* 注意：awl_ime_im_* 各自取 rwl(rd)，这里不能再包一层 ——
+     * 递归读锁在有写者等待时会死锁。 */
     if (o->has_delete) {
         awl_ime_im_delete(o->pend_before, o->pend_after);
         o->has_delete = 0;
@@ -190,7 +191,6 @@ static void im_commit(struct wl_client* c, struct wl_resource* res, uint32_t ser
         free(o->pend_preedit); o->pend_preedit = NULL;
         o->has_preedit = 0;
     }
-    pthread_rwlock_unlock(&g_srv.rwl);
 
     im_send_done(o);
 }
