@@ -132,6 +132,9 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     private CtrlBinder ctrl;
     private int lastW, lastH;
     private int lastImeMargin = -1;
+    private WindowInsets mLastInsets;      /* 最近一次窗口 insets，底栏显隐后重算 surface 缩进 */
+    private int mBarHeight;                /* 额外按键栏高度（px），0 = 不显示 */
+    private boolean mBarFloating;          /* 底栏是否覆盖在画面上（不压缩 surface） */
     private boolean attached;
     private boolean finishingByGone;   /* client closed the window / evicted, nothing left to report */
     private boolean deathLinked;       /* daemon death monitoring attached */
@@ -739,22 +742,28 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     private void addExtraKeysBar() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int mode = prefs.getInt(KEY_EXTRA_KEYS_MODE, 0);
-        if (mode == 1) return;                       /* 从不 */
+        if (mode == 1) {                        /* 从不 */
+            mBarHeight = 0;
+            return;
+        }
         mExtraKeysBar = new ExtraKeysBar(this, mExtraSender);
-        mExtraKeysBar.setFloating(prefs.getBoolean(KEY_EXTRA_KEYS_FLOAT, false));
+        mBarFloating = prefs.getBoolean(KEY_EXTRA_KEYS_FLOAT, false);
+        mExtraKeysBar.setFloating(mBarFloating);
+        /* 必须给显式高度：按钮是 GridLayout 的 height=0 + FILL，第一遍测量会拿到
+         * EXACTLY 0 → 行的实测高度为 0 → WRAP_CONTENT 的 GridLayout 总高就是 0，
+         * 底栏会完全不可见（5.x 也是一直用显式高度，见 MainActivity.mBarHeight）。 */
+        mBarHeight = Math.round(37.5f * getResources().getDisplayMetrics().density
+                * mExtraKeysBar.getRowCount());
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        lp.gravity = Gravity.BOTTOM;
+                FrameLayout.LayoutParams.MATCH_PARENT, mBarHeight, Gravity.BOTTOM);
         mExtraKeysBar.setLayoutParams(lp);
         root.addView(mExtraKeysBar);
         if (mode == 2) {
             mExtraKeysBar.setVisibility(View.GONE);  /* 随软键盘：onImeShow 再显示 */
         }
         /* 让 HUD 的 ENTER/KB 浮在按键栏之上，不重叠 */
-        mExtraKeysBar.post(() -> {
-            int h = mExtraKeysBar.getHeight();
-            if (h > 0 && hudRoot != null) hudRoot.setTranslationY(-h);
-        });
+        if (hudRoot != null) hudRoot.setTranslationY(-mBarHeight);
+        applyImeInsetSafe();
     }
 
     private void addVirtualKeyboard() {
@@ -782,12 +791,24 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     }
 
     /** 额外按键栏「随软键盘」模式：IME 显示/隐藏时同步。 */
+    private void syncExtraKeysFloating() {
+        if (mExtraKeysBar == null) return;
+        boolean floating = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(KEY_EXTRA_KEYS_FLOAT, false);
+        if (floating == mBarFloating) return;
+        mBarFloating = floating;
+        mExtraKeysBar.setFloating(floating);
+        applyImeInsetSafe();   /* 浮动时底栏覆盖画面，不再压缩 surface */
+    }
+
+    /** 额外按键栏「随软键盘」模式：IME 显示/隐藏时同步。 */
     private void syncExtraKeysBarWithIme() {
         if (mExtraKeysBar == null) return;
         int mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .getInt(KEY_EXTRA_KEYS_MODE, 0);
         if (mode != 2) return;
         mExtraKeysBar.setVisibility(imeWanted ? View.VISIBLE : View.GONE);
+        applyImeInsetSafe();   /* 底栏占的高度变了，surface 缩进要跟着变 */
     }
 
     private TextView hudButton(String text, String desc, int gravity,
@@ -974,6 +995,7 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
         setupFullscreen();   /* the system may reset immersive mode */
         applyOrientation();  /* 用户在设置里改了方向 */
         syncSettingsNotification();
+        syncExtraKeysFloating();   /* 设置里改了「浮动底栏」时立即生效 */
         Awl.registerCallback(winEvents);
         Awl.acquire();   /* process event subscription (sibling windows dying while this one is foreground) */
         if (clipMgr != null)
@@ -1103,13 +1125,26 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     }
 
     private void applyImeInset(WindowInsets insets) {
+        mLastInsets = insets;
         int imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
-        int margin = imeOverlayMode() ? 0 : imeBottom;
+        int margin = imeOverlayMode() ? 0 : imeBottom + visibleBarHeight();
         if (margin == lastImeMargin) return;
         lastImeMargin = margin;
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sv.getLayoutParams();
         lp.bottomMargin = margin;
         sv.setLayoutParams(lp);   /* surface resize → configure the client to reflow */
+    }
+
+    /** 底栏可见且非浮动时占掉的高度（要算进 surface 的底部缩进）。 */
+    private int visibleBarHeight() {
+        if (mExtraKeysBar == null || mBarHeight <= 0) return 0;
+        if (mExtraKeysBar.getVisibility() != View.VISIBLE) return 0;
+        return mBarFloating ? 0 : mBarHeight;
+    }
+
+    /** 底栏显隐/浮动变化后重算 surface 缩进（还没有 insets 时跳过）。 */
+    private void applyImeInsetSafe() {
+        if (mLastInsets != null) applyImeInset(mLastInsets);
     }
 
     private void onImeShow(int hint, int purpose) {
