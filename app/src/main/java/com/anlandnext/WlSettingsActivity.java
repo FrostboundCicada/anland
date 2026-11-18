@@ -1,6 +1,7 @@
 package com.anlandnext;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
@@ -310,6 +311,65 @@ public class WlSettingsActivity extends Activity {
          * write back to the daemon */
         scSw.setOnCheckedChangeListener((b, on) -> WlBinder.configSet("sc_enabled", on ? 1 : 0));
         root.addView(scSw);
+
+        /* ---- anland5 风格输入 UI（额外按键栏 / 硬件键拦截）----
+         * 存在 anland_settings（与 libawl 的 AwlWindowActivity 共用），
+         * 改完下次 attach/ resume 生效。 */
+        android.widget.Space gap5 = new android.widget.Space(this);
+        gap5.setMinimumHeight(64);
+        root.addView(gap5);
+
+        SharedPreferences anland = getSharedPreferences("anland_settings", MODE_PRIVATE);
+
+        TextView extraTip = new TextView(this);
+        extraTip.setText(R.string.extra_keys_tip);
+        root.addView(extraTip);
+
+        RadioGroup extraRg = new RadioGroup(this);
+        RadioButton extraAlways = new RadioButton(this);
+        extraAlways.setId(8);
+        extraAlways.setText(R.string.extra_keys_always);
+        RadioButton extraNever = new RadioButton(this);
+        extraNever.setId(9);
+        extraNever.setText(R.string.extra_keys_never);
+        RadioButton extraIme = new RadioButton(this);
+        extraIme.setId(10);
+        extraIme.setText(R.string.extra_keys_with_ime);
+        extraRg.addView(extraAlways);
+        extraRg.addView(extraNever);
+        extraRg.addView(extraIme);
+        int extraMode = anland.getInt("extra_keys_mode", 0);
+        (extraMode == 1 ? extraNever : extraMode == 2 ? extraIme : extraAlways).setChecked(true);
+        extraRg.setOnCheckedChangeListener((g, checkedId) ->
+                anland.edit().putInt("extra_keys_mode",
+                        checkedId == 9 ? 1 : checkedId == 10 ? 2 : 0).apply());
+        root.addView(extraRg);
+
+        android.widget.Switch extraFloatSw = new android.widget.Switch(this);
+        extraFloatSw.setText(R.string.extra_keys_floating);
+        extraFloatSw.setChecked(anland.getBoolean("extra_keys_floating", false));
+        extraFloatSw.setOnCheckedChangeListener((b, on) ->
+                anland.edit().putBoolean("extra_keys_floating", on).apply());
+        root.addView(extraFloatSw);
+
+        android.widget.Space gap6 = new android.widget.Space(this);
+        gap6.setMinimumHeight(64);
+        root.addView(gap6);
+
+        TextView keyTip = new TextView(this);
+        keyTip.setText(R.string.key_intercept_tip);
+        root.addView(keyTip);
+
+        android.widget.Switch keySw = new android.widget.Switch(this);
+        keySw.setText(R.string.key_intercept);
+        keySw.setChecked(anland.getBoolean("accessibility_key_intercept", false));
+        keySw.setOnCheckedChangeListener((b, on) -> {
+            anland.edit().putBoolean("accessibility_key_intercept", on).apply();
+            if (on) KeyInterceptor.launch(this);
+            else KeyInterceptor.shutdown(true);
+            KeyInterceptor.recheck();
+        });
+        root.addView(keySw);
 
         android.widget.ScrollView scroll = new android.widget.ScrollView(this);
         scroll.setFillViewport(true);

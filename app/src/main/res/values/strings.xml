@@ -34,4 +34,13 @@
     <string name="init_size_h">Height</string>
     <string name="sc_backend_tip">Compositor backend (on = SC/HWC: wayland layers are composed by SurfaceFlinger, zero-copy scanout when possible; off = per-window GL renderer fallback. Applies to windows attached from now on):</string>
     <string name="sc_backend">SC compositor backend (HWC)</string>
+
+    <!-- anland5 风格输入 UI -->
+    <string name="extra_keys_tip">Extra keys bar (anland5 style):</string>
+    <string name="extra_keys_always">Always show</string>
+    <string name="extra_keys_never">Never show</string>
+    <string name="extra_keys_with_ime">Show with the soft keyboard</string>
+    <string name="extra_keys_floating">Floating bar (translucent, overlays the window)</string>
+    <string name="key_intercept_tip">Hardware key interception (anland5 style, needs the accessibility service; forwards Fn / F1-F12 / Back→Esc to the focused window):</string>
+    <string name="key_intercept">Intercept hardware keys</string>
 </resources>

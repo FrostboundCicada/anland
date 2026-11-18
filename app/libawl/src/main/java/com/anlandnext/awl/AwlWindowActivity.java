@@ -5,6 +5,7 @@ import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -36,6 +37,10 @@ import android.view.inputmethod.TextAttribute;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.TextView;
+
+import com.anlandnext.awl.ui.ExtraKeysBar;
+import com.anlandnext.awl.ui.KeyResolver;
+import com.anlandnext.awl.ui.VirtualKeyboardView;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -315,6 +320,40 @@ public class AwlWindowActivity extends Activity {
         }
     }
 
+    /** 无障碍键拦截服务用：当前获得焦点的窗口（没有则 null）。 */
+    public static AwlWindowActivity focusedLive() {
+        for (AwlWindowActivity a : LIVE.values())
+            if (a.hasWindowFocus()) return a;
+        return null;
+    }
+
+    /** 按 daemon id 找存活的窗口（没有则 null）。 */
+    public static AwlWindowActivity findLive(long id) {
+        return LIVE.get(id);
+    }
+
+    /** 本窗口的 daemon id。 */
+    public long windowId() { return id; }
+
+    /** 释放一个已转发的 evdev 键（无障碍服务用）。 */
+    public void handleAccessibilityKeyUp(int evdev) {
+        if (id >= 0) Awl.sendKey(id, evdev, false);
+    }
+
+    /** 无障碍键拦截开关（存在 anland_settings/accessibility_key_intercept）。 */
+    public boolean isAccessibilityInterceptEnabled() {
+        return getSharedPreferences("anland_settings", MODE_PRIVATE)
+                .getBoolean("accessibility_key_intercept", false);
+    }
+
+    /** 把一个硬件键翻译成 evdev 并转发到本窗口；返回是否被消费。 */
+    public boolean handleAccessibilityKey(KeyEvent event) {
+        int evdev = KeyResolver.resolveEvdev(event);
+        if (evdev == -1 || id < 0) return false;
+        Awl.sendKey(id, evdev, event.getAction() == KeyEvent.ACTION_DOWN);
+        return true;
+    }
+
     /** Same, plus a Recents sweep for a host whose PROCESS is already gone
      *  (LMK / force-stop while the window lived on in the daemon): there is
      *  no instance to finish, yet the task — root ActivityRecord, no process
@@ -535,6 +574,8 @@ public class AwlWindowActivity extends Activity {
 
         setupFullscreen();   /* immersive */
         addHud();            /* anland5 样式的悬浮控件（SUPER / ENTER / KB）*/
+        addExtraKeysBar();   /* anland5 样式的底部额外按键栏 */
+        addVirtualKeyboard();/* anland5 样式的浮动虚拟键盘 */
     }
 
     /* ================= HUD（对齐 anland5 的悬浮控件）=================
@@ -578,6 +619,94 @@ public class AwlWindowActivity extends Activity {
         hudRoot.addView(sup);
 
         root.addView(hudRoot);
+    }
+
+    /* ================= anland5 风格的额外按键栏 / 虚拟键盘 =================
+     *
+     * 这两样是 anland5 consumer 的招牌输入 UI，anland6 原先只有窗口本身。
+     * 它们都通过 libawl 的公开输入 API（Awl.sendKey / Awl.sendText）发事件，
+     * 显示与路由仍由本 Activity 独占（事件到达本窗口）。 */
+
+    private static final String PREFS_NAME = "anland_settings";
+    /* 0 = 总是显示, 1 = 从不, 2 = 随软键盘 */
+    private static final String KEY_EXTRA_KEYS_MODE = "extra_keys_mode";
+    private static final String KEY_EXTRA_KEYS_FLOAT = "extra_keys_floating";
+
+    private ExtraKeysBar mExtraKeysBar;
+    private VirtualKeyboardView mVirtualKeyboard;
+
+    private final ExtraKeysBar.Sender mExtraSender = new ExtraKeysBar.Sender() {
+        @Override public void key(int action, int evdev) {
+            if (id >= 0) Awl.sendKey(id, evdev, action == 0);
+        }
+        @Override public void text(String s) {
+            if (id >= 0) Awl.sendText(id, s);
+        }
+        @Override public void toggleKeyboard() { toggleHudIme(); }
+        @Override public void toggleVirtualKeyboard() { toggleVirtualKeyboard(); }
+        @Override public void openSettings() {
+            Intent it = new Intent("anland.action.OPEN_SETTINGS");
+            it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(it);
+            } catch (Exception e) {
+                Log.w(TAG, "openSettings: nobody handles " + it.getAction(), e);
+            }
+        }
+    };
+
+    private void addExtraKeysBar() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        int mode = prefs.getInt(KEY_EXTRA_KEYS_MODE, 0);
+        if (mode == 1) return;                       /* 从不 */
+        mExtraKeysBar = new ExtraKeysBar(this, mExtraSender);
+        mExtraKeysBar.setFloating(prefs.getBoolean(KEY_EXTRA_KEYS_FLOAT, false));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.BOTTOM;
+        mExtraKeysBar.setLayoutParams(lp);
+        root.addView(mExtraKeysBar);
+        if (mode == 2) {
+            mExtraKeysBar.setVisibility(View.GONE);  /* 随软键盘：onImeShow 再显示 */
+        }
+        /* 让 HUD 的 ENTER/KB 浮在按键栏之上，不重叠 */
+        mExtraKeysBar.post(() -> {
+            int h = mExtraKeysBar.getHeight();
+            if (h > 0 && hudRoot != null) hudRoot.setTranslationY(-h);
+        });
+    }
+
+    private void addVirtualKeyboard() {
+        mVirtualKeyboard = new VirtualKeyboardView(this);
+        mVirtualKeyboard.setVisibility(View.GONE);
+        mVirtualKeyboard.setOnKeyEventListener(new VirtualKeyboardView.OnKeyEventListener() {
+            @Override public void onKeyDown(int scanCode) {
+                if (id >= 0) Awl.sendKey(id, scanCode, true);
+            }
+            @Override public void onKeyUp(int scanCode) {
+                if (id >= 0) Awl.sendKey(id, scanCode, false);
+            }
+        });
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.BOTTOM | Gravity.END;
+        mVirtualKeyboard.setLayoutParams(lp);
+        root.addView(mVirtualKeyboard);
+    }
+
+    private void toggleVirtualKeyboard() {
+        if (mVirtualKeyboard == null) return;
+        mVirtualKeyboard.setVisibility(
+                mVirtualKeyboard.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+    }
+
+    /** 额外按键栏「随软键盘」模式：IME 显示/隐藏时同步。 */
+    private void syncExtraKeysBarWithIme() {
+        if (mExtraKeysBar == null) return;
+        int mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(KEY_EXTRA_KEYS_MODE, 0);
+        if (mode != 2) return;
+        mExtraKeysBar.setVisibility(imeWanted ? View.VISIBLE : View.GONE);
     }
 
     private TextView hudButton(String text, String desc, int gravity,
@@ -905,6 +1034,7 @@ public class AwlWindowActivity extends Activity {
             hiddenInput.setInputType(imeInputType());
         }
         tryShowIme();
+        syncExtraKeysBarWithIme();
     }
 
     /** Focus may arrive late (surfaceChanged precedes onWindowFocusChanged) → show as soon as ready */
@@ -937,6 +1067,7 @@ public class AwlWindowActivity extends Activity {
             hiddenInput.setFocusableInTouchMode(false);
             hiddenInput.setEnabled(false);
         }
+        syncExtraKeysBarWithIme();
     }
 
     /** Editor state pushed by the daemon (the client's set_surrounding/cursor_rect take effect with the commit) */

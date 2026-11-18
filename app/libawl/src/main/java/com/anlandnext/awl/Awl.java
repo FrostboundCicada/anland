@@ -93,6 +93,36 @@ public final class Awl {
         return AwlClient.close(id);
     }
 
+    /* ---- input passthrough (hosted window -> wayland client) ----
+     * Event type values are the daemon's AWL_IN_* (must not change); code is
+     * an evdev code / touch id / tablet button, x/y are view coords or
+     * relative motion, v1/v2 carry state/pressure/wheel, meta = Android meta
+     * bits for MODIFIERS. Any thread: the transaction is ONEWAY and carries
+     * the target window id, so no routing state lives on either side. */
+    public static final int PTR_ENTER = 1, PTR_LEAVE = 2, PTR_MOTION = 3,
+            PTR_BUTTON = 4, PTR_AXIS = 5, PTR_REL = 6,
+            KEY = 9, TOUCH_DOWN = 11, TOUCH_MOTION = 12, TOUCH_UP = 13,
+            TOUCH_CANCEL = 14;
+
+    /** Send one input event to a hosted window. Field order matches the
+     *  daemon's AWL_T_INPUT. */
+    public static void sendInput(long id, int type, int code,
+                                 float x, float y, float v1, float v2, int meta) {
+        AwlClient.input(id, type, code, x, y, v1, v2, meta);
+    }
+
+    /** Key press/release by evdev scan code (v1 = 1 down / 0 up). */
+    public static void sendKey(long id, int scancode, boolean down) {
+        AwlClient.input(id, KEY, scancode, 0f, 0f, down ? 1f : 0f, 0f, 0);
+    }
+
+    /** Commit text through the IME bridge (text-input commit_string). Use for
+     *  printable characters; key events remain available via {@link #sendKey}. */
+    public static void sendText(long id, String text) {
+        if (text == null || text.isEmpty()) return;
+        AwlClient.ime(id, AwlClient.IME_COMMIT, 0, 0, text);
+    }
+
     /* ---- event subscription (process-wide; main thread bookkeeping) ---- */
 
     private static final EventBinder BINDER = new EventBinder();

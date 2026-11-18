@@ -19,8 +19,28 @@
              merged in from the libawl library module (same code third-party
              consumer apps run) -->
 
-        <!-- Window behavior settings -->
-        <activity android:name=".WlSettingsActivity" android:exported="false"/>
+        <!-- Window behavior settings。anland.action.OPEN_SETTINGS 让额外按键栏的
+             「设置」键能从 libawl 库模块里跨模块拉起（库不依赖 app 类）。 -->
+        <activity android:name=".WlSettingsActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="anland.action.OPEN_SETTINGS"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+
+        <!-- 硬件键拦截（对齐 anland5 的 KeyInterceptor）：Fn/F1-F12、Back→ESC -->
+        <service
+            android:name=".KeyInterceptor"
+            android:exported="true"
+            android:label="Anland KeyInterceptor"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config"/>
+        </service>
 
         <!-- client closed its own window → daemon notification finishes the Activity -->
         <receiver android:name=".WindowGoneReceiver" android:exported="true">

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- KeyCodeMapper: localized names for bindable hardware keys -->
+    <string name="key_volume_up">Volume Up</string>
+    <string name="key_volume_down">Volume Down</string>
+    <string name="key_volume_mute">Volume Mute</string>
+    <string name="key_power">Power</string>
+    <string name="key_camera">Camera</string>
+    <string name="key_headset_hook">Headset Hook</string>
+    <string name="key_media_play_pause">Play/Pause</string>
+    <string name="key_media_next">Next</string>
+    <string name="key_media_previous">Previous</string>
+    <string name="key_brightness_up">Brightness Up</string>
+    <string name="key_brightness_down">Brightness Down</string>
+    <string name="key_home">Home</string>
+    <string name="key_back">Back</string>
+    <string name="keycode_unknown">Keycode %1$d</string>
+    <string name="scancode_unknown">Scan code %1$d</string>
+    <string name="status_current_none">Current: None</string>
+</resources>
