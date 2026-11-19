@@ -5,6 +5,11 @@ type anland_host_service service_manager_type
 allow untrusted_app_29 anland_host_service service_manager find
 allow untrusted_app anland_host_service service_manager find
 allow shell anland_host_service service_manager find
+# 兜底：部分设备 /system overlay 挂得比 servicemanager 晚，anland.host 会退化成
+# default_android_service（plat_service_contexts 里的映射读不到）。没有这两条时
+# 应用 getService 返回 null，界面显示 "daemon not connected"。
+allow untrusted_app_29 default_android_service service_manager find
+allow untrusted_app default_android_service service_manager find
 # APP ↔ daemon binder calls (Surface transfer / linkToDeath)
 allow untrusted_app_29 ksu binder { call transfer }
 allow untrusted_app ksu binder { call transfer }
