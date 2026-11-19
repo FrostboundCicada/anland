@@ -596,7 +596,13 @@ void awl_datadev_android_clip(const char* utf8) {
     if (!g_clip_src) {
         g_clip_src = awl_datadev_internal_source(clip_fill_fd);
         if (!g_clip_src) return;
+        /* mime 必须覆盖 X11 客户端（Konsole 等经 Xwayland）常请求的类型：
+         * UTF8_STRING / TEXT / STRING 都指向同一段 UTF-8，缺一个客户端就
+         * 拿不到数据 → 粘贴键按了没反应。 */
         awl_datadev_internal_mime(g_clip_src, "text/plain;charset=utf-8");
+        awl_datadev_internal_mime(g_clip_src, "UTF8_STRING");
+        awl_datadev_internal_mime(g_clip_src, "TEXT");
+        awl_datadev_internal_mime(g_clip_src, "STRING");
         awl_datadev_internal_mime(g_clip_src, "text/plain");
     }
     if (!utf8) utf8 = "";
