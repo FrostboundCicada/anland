@@ -12,6 +12,22 @@ set_perm "$MODPATH/service.sh" 0 0 0755
 # Build a system overlay from the device's live platform file so
 # servicemanager labels anland.host with anland_host_service. Without this
 # entry root/su can see the service, but untrusted_app_29 cannot find it.
+# config.json 不进发布包（runtime_dir 是设备相关的）。但重装模块会把设备上的
+# config.json 一起覆盖掉，daemon 的 runtime_dir 退回编译默认值，和容器的
+# bind_mounts 对不上 —— socket 在容器里看不见，anland-session 报
+# "no wayland socket at /run/anland/wayland-0"，应用列表点着没反应。
+# 这里按容器配置里的 bind 源目录兜底生成。
+if [ ! -f "$MODPATH/config.json" ]; then
+  _rt=/data/local/tmp
+  _cfg=$(grep -rl 'bind_mounts=.*:/run/anland' /data/local/Droidspaces/Containers/*/container.config 2>/dev/null | head -1)
+  if [ -n "$_cfg" ]; then
+    _binds=$(sed -n 's/^bind_mounts=//p' "$_cfg" | head -1)
+    _src=$(printf '%s\n' "$_binds" | tr ',' '\n' | sed -n 's/^\(.*\):\/run\/anland$/\1/p' | head -1)
+    case "$_src" in /*) _rt="$_src" ;; esac
+  fi
+  printf '{\n  "runtime_dir": "%s"\n}\n' "$_rt" > "$MODPATH/config.json"
+fi
+
 PLAT_CTX_SRC=/system/etc/selinux/plat_service_contexts
 PLAT_CTX_DST="$MODPATH/system/etc/selinux/plat_service_contexts"
 if [ -r "$PLAT_CTX_SRC" ] && [ -f "$MODPATH/plat_service_contexts.anland" ]; then
