@@ -4,13 +4,13 @@
 
 Anland runs the graphical Linux apps of a container on a **rooted Android** device and shows each of them as a **native Android window** — its own entry in the app switcher, its own Surface, its own soft-keyboard focus. There is no virtual screen and no mirroring: every app gets a real window, and Android's own compositor keeps drawing the screen.
 
-It ships as a SukiSU/KernelSU module (`anland-awl`): a root daemon, a host APK, the session inside the container, and an audio bridge. The companion launcher [anland-shell](https://github.com/SuperTurtleDev/anland-shell) manages the containers and starts the apps.
+It ships as a SukiSU/KernelSU module (`anland-awl`): a root daemon, a host APK, the session inside the container, and an audio bridge. The companion launcher [anland-shell](https://github.com/misaka5202/anland-shell) manages the containers and starts the apps.
 
 > [!IMPORTANT]
 > **Branch status.** `main` is the active development branch — the refactored 6.x
 > architecture. As a consequence of the rewrite it does not yet reach the feature
 > completeness of 5.x: if you want stability and the full desktop experience, use
-> the [`legacy`](https://github.com/SuperTurtleDev/anland/tree/legacy) branch
+> the [`legacy`](https://github.com/misaka5202/anland/tree/legacy) branch
 > (5.x) instead. 5.x stays in maintenance until 6.x catches up with the 5.x
 > feature set (complete desktop, virtual keyboard, accessibility, …).
 > Maintenance is bug fixes only — and only functional bugs that affect usage;
@@ -111,7 +111,8 @@ default `1`; applied when a window attaches):
 
 ## Install
 
-1. Get the three artifacts: `build/module/anland-awl.zip`, `build/anland-wayland.apk`, `build/anlandx.tar.gz` — build them (below) or take them from CI.
+1. Get the three artifacts — `anland-awl.zip` (module), `anland-wayland.apk` (host), `anlandx.tar.gz` (container session). Take them from the latest release
+   ([6.2-ds6](https://github.com/misaka5202/anland/releases/tag/6.2-ds6), this fork — not upstream, see below), or build them (below).
 2. Flash the zip in your root manager and reboot. The daemon starts at boot (log: `/data/local/tmp/awl_daemon.log`).
 3. Install `anland-wayland.apk`.
 4. Inside the container, set up the session:
@@ -120,7 +121,36 @@ default `1`; applied when a window attaches):
    tar xzf anlandx.tar.gz && bash anlandx/setupanlandx.sh
    ```
 
-5. Manage containers and launch apps with [anland-shell](https://github.com/SuperTurtleDev/anland-shell).
+5. Manage containers and launch apps with [anland-shell](https://github.com/misaka5202/anland-shell).
+
+## Why this fork instead of upstream 6.2
+
+Upstream 6.2 cannot type. This fork fixes the whole input chain; releases are
+tagged `6.2-dsN` and built from `main`.
+
+1. **Soft-keyboard text never reaches apps.** Apps without `zwp_text_input_v3`
+   (terminals such as Konsole/XTerm) got nothing — `awl_ime_text()` dropped the
+   commit. The fork degrades ASCII text to `wl_keyboard` key events, the path
+   the Enter key already uses.
+2. **Chinese input is impossible upstream.** No `zwp_input_method_v2`, so a
+   container IME (fcitx5) had nowhere to deliver text. The fork implements it.
+3. **Windows never appear.** The xdg configure carried serial `0`, which clients
+   discard, so the surface never maps and anland-shell does nothing on tap.
+   The fork uses `next_serial`.
+4. **X11 apps could not read the clipboard.** The selection only advertised
+   `text/plain*`; Konsole and other Xwayland clients ask for `UTF8_STRING`.
+   The fork advertises `UTF8_STRING` / `TEXT` / `STRING`.
+5. **Reinstalling the module wiped `config.json`.** `runtime_dir` fell back to
+   the compiled default and stopped matching the container's `bind_mounts`, so
+   the socket was invisible inside the container. `customize.sh` now
+   regenerates it from the container's bind source.
+6. **The extra-keys bar was partly dead.** Its leftmost column (ESC/TAB) sat in
+   the system back-gesture region. The fork insets the bar by
+   `WindowInsets.Type.systemGestures()`.
+
+For terminals (no `text_input`), Chinese goes through the Wayland selection
+plus the terminal's paste shortcut — configurable as `paste_shortcut` in
+`config.json` (default `ctrl+shift+v`).
 
 ## Build
 
@@ -135,7 +165,7 @@ CI builds every push/PR and uploads the artifacts.
 
 ## Related projects
 
-- [anland-shell](https://github.com/SuperTurtleDev/anland-shell) — the launcher: container management and the app grid that drives all of this.
+- [anland-shell](https://github.com/misaka5202/anland-shell) — the launcher: container management and the app grid that drives all of this.
 
 ## License
 

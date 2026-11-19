@@ -13,7 +13,7 @@ generations, and what 6.x added to align with 5.x.
 | Android window | **one fullscreen window** (consumer Activity) | **one window per app** (`AwlWindowActivity`) |
 | Compositing | on the Android consumer side | host `waylandbridge` |
 | Cursor source | drawn into the frame by the far end | client `wl_pointer.set_cursor` |
-| Floating controls (HUD) | **present** | absent originally, added in this branch |
+| Floating controls (HUD) | **present** (SUPER/ENTER/KB/⚙) | those keys removed; now an **extra-keys bar + immersive bottom bar** |
 | System bars | hidden | hidden (same) |
 | In-container components | none (a patched compositor) | `anlandx` session (wayland link + rootless Xwayland + mini-wm) |
 
@@ -82,18 +82,26 @@ The consumer overlays a HUD layer (`hud/HudLayout`, `DefaultHudLayout2`):
 `dock_enabled` is `false` by default; the dock only appears while the soft
 keyboard is up.
 
-### 6.x (after this branch)
+### 6.x (current)
 
-`AwlWindowActivity` gained a non-focusable overlay:
+**The `SUPER` / `ENTER` / `KB` keys were removed on request**, replaced by an
+**extra-keys bar over an immersive bottom bar**:
 
-| Button | Position | Behaviour |
+| Element | Position | Behaviour |
 |---|---|---|
-| `SUPER` | mid-right | tap sends Left Meta (evdev 125); **long-press collapses/expands the row** |
-| `ENTER` | bottom-right | evdev `0x1c` press + release |
-| `KB` | bottom-right (above ENTER) | toggles the soft keyboard (`imeWanted`) |
+| key bar (two rows) | bottom | top `ESC / - / HOME / ↑ / END / PGUP / ⌨`; bottom `TAB / CTRL / ALT / ← / ↓ / → / PGDN / ⚙`; `⌨` toggles the soft keyboard, `⚙` opens settings |
+| immersive bar | bottom | **translucent by default**, adds no surface height; opacity adjustable in settings |
+| display mode | — | always / with-keyboard / hidden |
 
-**No settings button** — `libawl` is a library module and cannot depend on the
-app module's `WlSettingsActivity` in reverse.
+Two implementation notes:
+
+- **Gesture-region inset**: the bar pads itself by the left/right
+  `WindowInsets.Type.systemGestures()`. The leftmost column (`ESC`/`TAB`) used
+  to sit in the back-gesture region `[0,84]`, so the gesture swallowed the
+  touch and those keys did nothing.
+- **Settings live in the APK**: `libawl` is a library module and must not depend
+  on the app module's `WlSettingsActivity`; the bar only emits a `⚙` signal and
+  the host APK's *Window Settings* does the rest.
 
 ---
 

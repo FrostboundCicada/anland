@@ -12,7 +12,7 @@
 | Android 窗口 | **整屏单窗口**（consumer Activity） | **每个应用一个窗口**（`AwlWindowActivity`） |
 | 合成位置 | Android consumer 侧 | 宿主 `waylandbridge` |
 | 光标来源 | 远端画进画面 | 客户端 `wl_pointer.set_cursor` |
-| 悬浮控件（HUD） | **有** | 原**无**，本轮补齐 |
+| 悬浮控件（HUD） | **有**（SUPER/ENTER/KB/⚙） | 三键已移除，改**额外按键栏 + 沉浸式底栏** |
 | 系统栏 | 隐藏 | 隐藏（相同） |
 | 容器内组件 | 无（靠打过补丁的合成器） | `anlandx` 会话（wayland 链接 + rootless Xwayland + mini-wm） |
 
@@ -77,18 +77,25 @@ consumer 在画面上叠一层悬浮控件（`hud/HudLayout`、`DefaultHudLayout
 
 `dock_enabled` 默认 `false`，dock 只在软键盘弹出时出现。
 
-### 6.x（补齐后）
+### 6.x（当前）
 
-`AwlWindowActivity` 上加一层不抢焦点的悬浮层：
+**原先补齐的 `SUPER` / `ENTER` / `KB` 三键已按需求移除**，改为底部
+**额外按键栏 + 沉浸式底栏**：
 
-| 按钮 | 位置 | 行为 |
+| 元素 | 位置 | 行为 |
 |---|---|---|
-| `SUPER` | 右侧中部 | 点按发 Left Meta（evdev 125）；**长按收起/展开整排** |
-| `ENTER` | 右下 | evdev `0x1c` 的 press + release |
-| `KB` | 右下（ENTER 上方） | 切换软键盘（`imeWanted`） |
+| 按键栏（两排） | 底部 | 上排 `ESC / - / HOME / ↑ / END / PGUP / ⌨`；下排 `TAB / CTRL / ALT / ← / ↓ / → / PGDN / ⚙`；`⌨` 切换软键盘，`⚙` 打开设置 |
+| 沉浸式底栏 | 底部 | 默认**半透明**，不占surface 高度；透明度可在设置里调 |
+| 显示模式 | — | 常驻 / 随软键盘 / 隐藏，三档可切 |
 
-**没有做设置按钮**：`libawl` 是 library 模块，不能反向依赖 app 模块的
-`WlSettingsActivity`，硬加会破坏库的独立性。
+两个实现要点：
+
+- **避让系统手势区**：底栏用 `WindowInsets.Type.systemGestures()` 的左右
+  inset 做 padding。此前最左列（`ESC`/`TAB`）落在返回手势区 `[0,84]`，
+  touch 被手势吃掉，按键完全没反应。
+- **设置入口在 app 侧**：`libawl` 是 library 模块，不反向依赖 app 模块的
+  `WlSettingsActivity`；设置由宿主 APK 的 `Window Settings` 提供，按键栏只
+  发一个 `⚙` 信号。
 
 ---
 
@@ -106,7 +113,8 @@ consumer 在画面上叠一层悬浮控件（`hud/HudLayout`、`DefaultHudLayout
   anland6 的窗口虽然全屏（`[0,0][2136,3200]`），盖不住它。这不是 anland 的
   控件，需要在会话层处理（或确认它是否真的出现在 anland 窗口之上）。
 
-- 5.x 的 `SUPER` 是完整手势球（四个方向的组合键滑动），6.x 目前只发 Left Meta。
+- 5.x 的 `SUPER` 是完整手势球（四个方向的组合键滑动）。6.x 已按需求移除该键，
+  手势组合改为直接点按键栏上的修饰键（`CTRL`/`ALT`）。
 ---
 
 ## 相关文档

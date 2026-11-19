@@ -4,12 +4,12 @@
 
 Anland 在 **已 root 的 Android** 设备上运行 Linux 容器里的图形应用，并把每一个应用显示为一个**原生 Android 窗口**——在最近任务里有自己的卡片、有自己的 Surface、有自己的输入法焦点。没有虚拟屏幕，也没有画面镜像：每个应用拿到一个真正的窗口，屏幕仍由 Android 自己的合成器绘制。
 
-它以 SukiSU/KernelSU 模块（`anland-awl`）的形式发布：一个 root 守护进程、一个宿主 APK、容器内的会话，以及音频桥。配套启动器 [anland-shell](https://github.com/SuperTurtleDev/anland-shell) 负责管理容器和启动应用。
+它以 SukiSU/KernelSU 模块（`anland-awl`）的形式发布：一个 root 守护进程、一个宿主 APK、容器内的会话，以及音频桥。配套启动器 [anland-shell](https://github.com/misaka5202/anland-shell) 负责管理容器和启动应用。
 
 > [!IMPORTANT]
 > **分支状态。** `main` 是活跃开发分支（重构后的 6.x 架构）。由于重构，功能尚不及
 > 5.x 完整：追求稳定和完整桌面体验请使用
-> [`legacy`](https://github.com/SuperTurtleDev/anland/tree/legacy) 分支（5.x）。
+> [`legacy`](https://github.com/misaka5202/anland/tree/legacy) 分支（5.x）。
 > 5.x 会持续维护，直到 6.x 补齐 5.x 的功能（完整桌面、虚拟键盘、无障碍等）。
 > 维护仅限 bug 修复——且只接受影响使用的功能性 bug；重启 consumer app 即可解决的
 > 概率性小问题不在维护范围内。
@@ -99,7 +99,8 @@ flowchart LR
 
 ## 安装
 
-1. 取得三个产物：`build/module/anland-awl.zip`、`build/anland-wayland.apk`、`build/anlandx.tar.gz`——自己构建（见下）或从 CI 取。
+1. 取得三个产物：`anland-awl.zip`（模块）、`anland-wayland.apk`（宿主）、`anlandx.tar.gz`（容器会话）——从最新 Release
+   [6.2-ds6](https://github.com/misaka5202/anland/releases/tag/6.2-ds6)（**本 fork**，不是上游，原因见下）取，或自己构建（见下）。
 2. 在 root 管理器里刷入 zip 并重启。守护进程开机自启（日志：`/data/local/tmp/awl_daemon.log`）。
 3. 安装 `anland-wayland.apk`。
 4. 在容器内搭建会话：
@@ -108,7 +109,29 @@ flowchart LR
    tar xzf anlandx.tar.gz && bash anlandx/setupanlandx.sh
    ```
 
-5. 用 [anland-shell](https://github.com/SuperTurtleDev/anland-shell) 管理容器、启动应用。
+5. 用 [anland-shell](https://github.com/misaka5202/anland-shell) 管理容器、启动应用。
+
+## 为什么用本 fork 而不是上游 6.2
+
+上游 6.2 **打字是不可能的**。本 fork 修了整条输入链，Release 以 `6.2-dsN` 标记、由 `main` 构建。
+
+1. **软键盘文本到不了应用。** 不实现 `zwp_text_input_v3` 的应用（Konsole/XTerm
+   这类终端）什么都收不到 —— `awl_ime_text()` 直接丢弃 commit。改版把 ASCII
+   文本降级成 `wl_keyboard` 按键（回车键走的就是这条，已实测可用）。
+2. **上游中文输入不可能。** 没有 `zwp_input_method_v2`，容器内的 fcitx5 拿着字
+   无处可送。改版实现了它。
+3. **应用窗口起不来。** xdg configure 的 serial 为 0，客户端丢弃后 surface 永不
+   map，anland-shell 点应用没反应。改版改用 `next_serial`。
+4. **X11 应用读不到剪贴板。** 选区只声明 `text/plain*`，Konsole 这类 Xwayland
+   客户端要的是 `UTF8_STRING`。改版补上 `UTF8_STRING` / `TEXT` / `STRING`。
+5. **重装模块会丢 `config.json`。** `runtime_dir` 退回编译默认值，和容器的
+   `bind_mounts` 对不上，socket 在容器里看不见。`customize.sh` 现在会按容器
+   bind 源目录重新生成。
+6. **额外按键栏有一部分是死的。** 最左列（ESC/TAB）落在系统返回手势区，touch
+   被手势吃掉。改版用 `WindowInsets.Type.systemGestures()` 给底栏让边。
+
+终端（无 `text_input`）的中文走 Wayland 选区 + 该终端的粘贴键，可在
+`config.json` 用 `paste_shortcut` 配置（默认 `ctrl+shift+v`）。
 
 ## 构建
 
@@ -123,7 +146,7 @@ CI 会在每次 push/PR 时构建并上传产物。
 
 ## 相关项目
 
-- [anland-shell](https://github.com/SuperTurtleDev/anland-shell)——启动器：容器管理与启动这一切的应用格子。
+- [anland-shell](https://github.com/misaka5202/anland-shell)——启动器：容器管理与启动这一切的应用格子。
 
 ## 许可证
 
