@@ -26,7 +26,7 @@ static void send_configure_locked(struct awl_surface* s,
         uint32_t* p = wl_array_add(&arr, nstates * sizeof(uint32_t));
         if (p) memcpy(p, states, nstates * sizeof(uint32_t));
     }
-    uint32_t serial = wl_display_get_serial(g_srv.display);
+    uint32_t serial = wl_display_next_serial(g_srv.display);
     s->u.xdg.conf_w = w;
     s->u.xdg.conf_h = h;
     s->configured = 1;
@@ -579,8 +579,8 @@ static void xdg_surface_set_window_geometry(struct wl_client* c,
 
 static void xdg_surface_ack_configure(struct wl_client* c,
                                       struct wl_resource* res, uint32_t serial) {
-    LOGD("ack_configure serial=%u", serial);
     struct awl_surface* s = wl_resource_get_user_data(res);
+    LOGD("ack_configure serial=%u", serial);
     if (!s) return;
     if (!s->configured) {
         wl_resource_post_error(res, XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
