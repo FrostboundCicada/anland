@@ -786,9 +786,23 @@ static void tr_kbd_leave(uint64_t win) {
 }
 
 /* Key: update the bitmap/modifiers (consistent under the lock) → send key + modifiers directly */
+static void tr_key_raw(uint64_t win, uint32_t code, uint32_t state, uint32_t meta);
+
+/* 给指定窗口发「粘贴」快捷键（Ctrl+Shift+V，KDE/Konsole 默认）。
+ * 走 tr_key_raw：输入法抓键盘期间也要能贴（粘贴是应用侧动作）。 */
+void awl_input_send_paste(uint64_t win) {
+    LOGI("send_paste win=%llu (Ctrl+Shift+V)", (unsigned long long)win);
+    tr_key_raw(win, 47 /* KEY_V */, 1, AM_CTRL | AM_SHIFT);
+    tr_key_raw(win, 47, 0, 0);
+}
+
 static void tr_key(uint64_t win, uint32_t code, uint32_t state, uint32_t meta) {
     /* 输入法抓走键盘期间，按键改投给输入法（由它决定上屏或吞掉） */
     if (awl_im_forward_key(code, state, meta)) return;
+    tr_key_raw(win, code, state, meta);
+}
+
+static void tr_key_raw(uint64_t win, uint32_t code, uint32_t state, uint32_t meta) {
     uint32_t dep = 0, lck = 0;
     int mods_changed = 0;
     pthread_mutex_lock(&g_input_lock);

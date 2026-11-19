@@ -732,10 +732,20 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
         static uint64_t fallback_logged;
         if (fallback_logged != id) {
             fallback_logged = id;
-            LOGI("ime_text win=%llu: no enabled text_input, %zu bytes → keys",
-                 (unsigned long long)id, strlen(text));
+            LOGI("ime_text win=%llu: no enabled text_input, %zu bytes", (unsigned long long)id, strlen(text));
         }
-        awl_input_text_as_keys(id, text);
+        /* ASCII 有 evdev 码 → 按键；非 ASCII（中文）没有码 → 剪贴板 + 粘贴键。
+         * 终端类应用不实现 zwp_text_input_v3，这是它们唯一能拿到任意文本的路。 */
+        int non_ascii = 0;
+        for (const unsigned char* q = (const unsigned char*)text; *q; q++)
+            if (*q >= 0x80) { non_ascii = 1; break; }
+        if (non_ascii) {
+            LOGI("ime_text win=%llu: 非 ASCII → 剪贴板+Ctrl+Shift+V", (unsigned long long)id);
+            awl_datadev_android_clip(text);
+            awl_input_send_paste(id);
+        } else {
+            awl_input_text_as_keys(id, text);
+        }
     }
 }
 
@@ -795,6 +805,9 @@ int awl_ime_im_delete(uint32_t before, uint32_t after) {
 
 /* 不取锁版本：调用方已持 rwl(rd)（awl_im.c 的 activate/notify 在锁内调它，
  * 再包一层读锁会在有写者等待时死锁） */
+/* 当前键盘焦点窗口（input_method 在没有 text_input 时也要能把文本投过去） */
+uint64_t awl_ime_focus_win(void) { return g_focus_win; }
+
 int awl_ime_im_state_unlocked(const char** surrounding, uint32_t* hint, uint32_t* purpose) {
     struct awl_ime_obj* t = g_cur_ti;
     if (!t) return 0;

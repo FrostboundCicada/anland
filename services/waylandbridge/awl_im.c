@@ -179,7 +179,20 @@ static void im_commit(struct wl_client* c, struct wl_resource* res, uint32_t ser
         o->pend_before = o->pend_after = 0;
     }
     if (o->has_commit) {
-        if (o->pend_commit) awl_ime_im_commit(o->pend_commit);
+        int sent = 0;
+        if (o->pend_commit) sent = awl_ime_im_commit(o->pend_commit);
+        if (!sent && o->pend_commit) {
+            /* 没有可用 text_input（终端类应用）→ 剪贴板 + 粘贴键。非 ASCII 才需要，
+             * ASCII 的按键降级由 awl_ime_text 那边处理。 */
+            int non_ascii = 0;
+            for (const unsigned char* q = (const unsigned char*)o->pend_commit; *q; q++)
+                if (*q >= 0x80) { non_ascii = 1; break; }
+            if (non_ascii) {
+                LOGI("im_commit: 无 text_input，非 ASCII → 剪贴板+Ctrl+Shift+V");
+                awl_datadev_android_clip(o->pend_commit);
+                awl_input_send_paste(awl_ime_focus_win());
+            }
+        }
         free(o->pend_commit); o->pend_commit = NULL;
         o->has_commit = 0;
     }

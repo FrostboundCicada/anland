@@ -558,8 +558,11 @@ void awl_im_setup(void);            /* 创建 manager 全局（server_start） *
 void awl_im_activate(void);
 void awl_im_deactivate(void);
 void awl_im_notify_state(void);   /* 应用侧 text_input 状态变化 → 通知输入法 */
+uint64_t awl_ime_focus_win(void);   /* 当前键盘焦点窗口 */
 /* Android meta → xkb modifier mask（与 awl_input.c 的按键路径共用） */
 void meta_to_masks(uint32_t meta, uint32_t* dep, uint32_t* lck);
+/* 给指定窗口发粘贴快捷键（终端等无 text_input 的应用用剪贴板+粘贴上屏） */
+void awl_input_send_paste(uint64_t win);
 /* Cursor hooks (set_cursor state lives in awl_input.c, own g_cursor_lock;
  * order rwl → g_cursor_lock → ev_lock):
  *  - surface_gone: caller holds rwl.wr (awl_surface.c destroy path). Drops
@@ -575,6 +578,7 @@ void meta_to_masks(uint32_t meta, uint32_t* dep, uint32_t* lck);
 uint64_t awl_input_surface_gone(struct awl_surface* s);
 void awl_input_cursor_gone_notify(uint64_t win);
 uint64_t awl_input_cursor_window(struct awl_surface* s);   /* caller holds rwl (rd/wr) */
+void awl_datadev_android_clip(const char* utf8);   /* 设 Wayland 选区（内部 source） */
 void awl_input_cursor_commit(struct awl_surface* s, int32_t off_x, int32_t off_y);
 /* Cursor surface committed with a real buffer → hide the Android pointer
  * (deferred from set_cursor; caller holds no lock, called on the commit path) */
