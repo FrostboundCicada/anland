@@ -563,6 +563,7 @@ uint64_t awl_ime_focus_win(void);   /* 当前键盘焦点窗口 */
 void meta_to_masks(uint32_t meta, uint32_t* dep, uint32_t* lck);
 /* 给指定窗口发粘贴快捷键（终端等无 text_input 的应用用剪贴板+粘贴上屏） */
 void awl_input_send_paste(uint64_t win);
+void awl_input_set_paste_spec(const char* spec);   /* config.json "paste_shortcut" */
 /* Cursor hooks (set_cursor state lives in awl_input.c, own g_cursor_lock;
  * order rwl → g_cursor_lock → ev_lock):
  *  - surface_gone: caller holds rwl.wr (awl_surface.c destroy path). Drops

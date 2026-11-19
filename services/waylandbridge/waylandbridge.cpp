@@ -1370,6 +1370,11 @@ static void cfg_load_and_apply(void) {
     } else if (aa != -1) {
         LOGE("config: auto_attach=%d out of range (0..1), ignored", aa);
     }
+    char paste_spec[64];
+    if (cfg_parse_str(buf, "paste_shortcut", paste_spec, sizeof(paste_spec)) == 0)
+        awl_input_set_paste_spec(paste_spec);
+    else
+        awl_input_set_paste_spec(NULL);   /* 默认 ctrl+shift+v */
     int sc = cfg_parse_int(buf, "sc_enabled");
     if (sc == 0 || sc == 1) {
         g_cfg_sc.store(sc != 0, std::memory_order_relaxed);

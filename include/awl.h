@@ -304,6 +304,9 @@ void awl_ime_text(uint64_t id, uint32_t op, const char* text, int32_t a, int32_t
  * 非 ASCII（中文等）无 evdev 码，跳过并记 LOGD —— 中文输入需要
  * zwp_input_method_v2，是另一件事。any thread。 */
 void awl_input_text_as_keys(uint64_t id, const char* text);
+/* 终端等无 text_input 的应用用剪贴板 + 粘贴键上屏中文；spec 形如
+ * "ctrl+shift+v" / "ctrl+v" / "shift+insert"，NULL = 默认 ctrl+shift+v */
+void awl_input_set_paste_spec(const char* spec);
 
 /* ---- Android clipboard → wl selection (read by the focused Activity, then
  *      pushed over binder; any thread) ----

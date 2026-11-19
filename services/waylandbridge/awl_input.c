@@ -38,6 +38,7 @@
 #include "awl_internal.h"
 
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/mman.h>          /* memfd: keymap */
@@ -790,10 +791,52 @@ static void tr_key_raw(uint64_t win, uint32_t code, uint32_t state, uint32_t met
 
 /* 给指定窗口发「粘贴」快捷键（Ctrl+Shift+V，KDE/Konsole 默认）。
  * 走 tr_key_raw：输入法抓键盘期间也要能贴（粘贴是应用侧动作）。 */
+/* 粘贴快捷键序列（可配置）。Konsole 这类 X11 应用对 Ctrl+Shift+V 的识别
+ * 取决于其自身配置，实测默认配置下三个常见键都不触发，所以开放配置。 */
+struct paste_key { uint32_t code; uint32_t meta; };
+static struct paste_key g_paste_seq[8];
+static int g_paste_n;
+
+void awl_input_set_paste_spec(const char* spec) {
+    /* 形如 "ctrl+shift+v"、"ctrl+v"、"shift+insert"。大小写不敏感。 */
+    static const struct { const char* name; uint32_t code; } keys[] = {
+        {"ctrl", 29}, {"lctrl", 29}, {"shift", 42}, {"lshift", 42},
+        {"alt", 56}, {"v", 47}, {"insert", 110}, {"ins", 110},
+    };
+    g_paste_n = 0;
+    if (!spec || !*spec) spec = "ctrl+shift+v";
+    char buf[64];
+    snprintf(buf, sizeof buf, "%s", spec);
+    for (char* p = buf; *p; p++) *p = (char)tolower((unsigned char)*p);
+    char* save = NULL;
+    for (char* tok = strtok_r(buf, "+", &save); tok && g_paste_n < 8;
+         tok = strtok_r(NULL, "+", &save)) {
+        uint32_t code = 0;
+        for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++)
+            if (strcmp(tok, keys[i].name) == 0) { code = keys[i].code; break; }
+        if (!code) { LOGE("paste_shortcut: unknown key '%s'", tok); return; }
+        g_paste_seq[g_paste_n].code = code;
+        g_paste_seq[g_paste_n].meta = 0;
+        g_paste_n++;
+    }
+    /* meta：修饰键本身之外的修饰状态 */
+    uint32_t meta = 0;
+    for (int i = 0; i < g_paste_n; i++) {
+        if (g_paste_seq[i].code == 29) meta |= AM_CTRL;
+        if (g_paste_seq[i].code == 42) meta |= AM_SHIFT;
+        if (g_paste_seq[i].code == 56) meta |= AM_ALT;
+    }
+    for (int i = 0; i < g_paste_n; i++) g_paste_seq[i].meta = meta;
+    LOGI("paste_shortcut = '%s' (%d keys)", spec, g_paste_n);
+}
+
 void awl_input_send_paste(uint64_t win) {
-    LOGI("send_paste win=%llu (Ctrl+Shift+V)", (unsigned long long)win);
-    tr_key_raw(win, 47 /* KEY_V */, 1, AM_CTRL | AM_SHIFT);
-    tr_key_raw(win, 47, 0, 0);
+    LOGI("send_paste win=%llu (%d keys)", (unsigned long long)win, g_paste_n);
+    /* 完整物理序列：修饰键按下 → 主键按下/抬起 → 修饰键逆序抬起 */
+    for (int i = 0; i < g_paste_n - 1; i++) tr_key_raw(win, g_paste_seq[i].code, 1, g_paste_seq[i].meta);
+    tr_key_raw(win, g_paste_seq[g_paste_n - 1].code, 1, g_paste_seq[g_paste_n - 1].meta);
+    tr_key_raw(win, g_paste_seq[g_paste_n - 1].code, 0, g_paste_seq[g_paste_n - 1].meta);
+    for (int i = g_paste_n - 2; i >= 0; i--) tr_key_raw(win, g_paste_seq[i].code, 0, g_paste_seq[i].meta);
 }
 
 static void tr_key(uint64_t win, uint32_t code, uint32_t state, uint32_t meta) {
