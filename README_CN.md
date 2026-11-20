@@ -100,7 +100,7 @@ flowchart LR
 ## 安装
 
 1. 取得三个产物：`anland-awl.zip`（模块）、`anland-wayland.apk`（宿主）、`anlandx.tar.gz`（容器会话）——从最新 Release
-   [6.2-ds8](https://github.com/misaka5202/anland/releases/tag/6.2-ds8)（**本 fork**，不是上游，原因见下）取，或自己构建（见下）。
+   [v6.2.8](https://github.com/misaka5202/anland/releases/tag/v6.2.8)（**本 fork**，不是上游，原因见下）取，或自己构建（见下）。
 2. 在 root 管理器里刷入 zip 并重启。守护进程开机自启（日志：`/data/local/tmp/awl_daemon.log`）。
 3. 安装 `anland-wayland.apk`。
 4. 在容器内搭建会话：
@@ -111,9 +111,11 @@ flowchart LR
 
 5. 用 [anland-shell](https://github.com/misaka5202/anland-shell) 管理容器、启动应用。
 
+完整发布历史：[doc/CHANGELOG.md](doc/CHANGELOG.md)。
+
 ## 为什么用本 fork 而不是上游 6.2
 
-上游 6.2 **打字是不可能的**。本 fork 修了整条输入链，Release 以 `6.2-dsN` 标记、由 `main` 构建。
+上游 6.2 **打字是不可能的**。本 fork 修了整条输入链，Release 以 `v6.2.N` 标记、由 `main` 构建。
 
 1. **软键盘文本到不了应用。** 不实现 `zwp_text_input_v3` 的应用（Konsole/XTerm
    这类终端）什么都收不到 —— `awl_ime_text()` 直接丢弃 commit。改版把 ASCII
@@ -133,7 +135,7 @@ flowchart LR
 终端（无 `text_input`）的中文走 Wayland 选区 + 该终端的粘贴键，可在
 `config.json` 用 `paste_shortcut` 配置（默认 `ctrl+shift+v`）。
 
-## 6.2-ds7 之后的变化
+## v6.2.7 与 v6.2.8 的变化
 
 - **窗口可能一半卡在上一个画面。** `wl_surface.damage` 报的是 surface 坐标，
   `wl_surface.damage_buffer` 报的是 buffer 坐标；之前 daemon 把 surface 坐标

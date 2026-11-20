@@ -112,7 +112,7 @@ default `1`; applied when a window attaches):
 ## Install
 
 1. Get the three artifacts — `anland-awl.zip` (module), `anland-wayland.apk` (host), `anlandx.tar.gz` (container session). Take them from the latest release
-   ([6.2-ds8](https://github.com/misaka5202/anland/releases/tag/6.2-ds8), this fork — not upstream, see below), or build them (below).
+   ([v6.2.8](https://github.com/misaka5202/anland/releases/tag/v6.2.8), this fork — not upstream, see below), or build them (below).
 2. Flash the zip in your root manager and reboot. The daemon starts at boot (log: `/data/local/tmp/awl_daemon.log`).
 3. Install `anland-wayland.apk`.
 4. Inside the container, set up the session:
@@ -123,10 +123,12 @@ default `1`; applied when a window attaches):
 
 5. Manage containers and launch apps with [anland-shell](https://github.com/misaka5202/anland-shell).
 
+Full release history: [doc/CHANGELOG.md](doc/CHANGELOG.md).
+
 ## Why this fork instead of upstream 6.2
 
 Upstream 6.2 cannot type. This fork fixes the whole input chain; releases are
-tagged `6.2-dsN` and built from `main`.
+tagged `v6.2.N` and built from `main`.
 
 1. **Soft-keyboard text never reaches apps.** Apps without `zwp_text_input_v3`
    (terminals such as Konsole/XTerm) got nothing — `awl_ime_text()` dropped the
@@ -152,7 +154,7 @@ For terminals (no `text_input`), Chinese goes through the Wayland selection
 plus the terminal's paste shortcut — configurable as `paste_shortcut` in
 `config.json` (default `ctrl+shift+v`).
 
-## What changed after 6.2-ds7
+## What changed in v6.2.7 and v6.2.8
 
 - **A window could stay half on the previous frame.** `wl_surface.damage`
   carries surface coordinates while `wl_surface.damage_buffer` carries buffer
