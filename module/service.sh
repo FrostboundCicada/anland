@@ -44,6 +44,16 @@ start_daemon() {
 # createTrack_l INVALID_OPERATION, OpenSL ES error 9 / AAudio -896; Termux's
 # pulseaudio works the same way — as the app). su <uid> keeps the awl_daemon
 # domain (permissive) via the exec label; the app uid needs no app running.
+#
+# Android 17 (SDK 37+) ADDITIONAL HARDENING: the audio framework rejects
+# AudioTrack / AAudioStream creation from any background process regardless of
+# uid — the app must either have a visible Activity or run a non-SHORT_SERVICE
+# foreground service. Real-world symptom: module-sles-sink Realize() returns
+# SL_RESULT_RESOURCE_ERROR (9); module-aaudio-sink returns AAUDIO_ERROR_INVALID_STATE.
+# We bring com.anlandnext to foreground here so the initial AudioTrack can be
+# created. Once the track exists, subsequent background transitions are fine.
+# The foreground Activity does NOT need to stay visible — only the createTrack
+# initialization phase is gated by the hardening (verified on PHZ110 @ Android 17).
 # /data/adb is 0700 root → the tree is copied out to $RT/pulse each boot
 # (module search path + libs point there: PULSE_CONFIG_PATH + daemon.conf
 # dl-search-path + LD_LIBRARY_PATH — all runtime-dir relative, no baked path).
@@ -58,6 +68,22 @@ start_daemon() {
 PULSE_PROBE_TIMEOUT=2
 PULSE_PROBE_POLLS=4
 PULSE_START_RETRIES=2
+
+bring_to_foreground() {
+  local sdk
+  sdk=$(getprop ro.build.version.sdk 2>/dev/null)
+  [ "${sdk:-0}" -ge 37 ] || return 0
+  # MainActivity exists in every com.anlandnext build and has a launcher
+  # intent; EXCLUDE_FROM_RECENTS keeps the user's recent-tasks list clean.
+  am start -n com.anlandnext/.MainActivity \
+    --activity-clear-top \
+    --activity-brought-to-front \
+    --activity-exclude-from-recents \
+    >/dev/null 2>&1 || true
+  # Wait for the Activity to reach RESUMED before pulseaudio tries createTrack.
+  # On cold boot the APK may take a moment; 3s covers both warm and cold starts.
+  sleep 3
+}
 
 stop_pulse() {
   # The runtime copy is disposable, but the process must be stopped before it
@@ -199,6 +225,9 @@ start_pulse() {
   fi
   # module lookup: daemon.conf is read from PULSE_CONFIG_PATH (this copy)
   echo "dl-search-path = $PAR/lib/pulseaudio/modules" >> "$PAR/etc/pulse/daemon.conf"
+
+  # Android 17+: foreground the APK so createTrack doesn't get rejected.
+  bring_to_foreground
 
   attempt=1
   while [ "$attempt" -le "$PULSE_START_RETRIES" ]; do
