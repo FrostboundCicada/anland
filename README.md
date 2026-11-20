@@ -112,7 +112,7 @@ default `1`; applied when a window attaches):
 ## Install
 
 1. Get the three artifacts — `anland-awl.zip` (module), `anland-wayland.apk` (host), `anlandx.tar.gz` (container session). Take them from the latest release
-   ([6.2-ds6](https://github.com/misaka5202/anland/releases/tag/6.2-ds6), this fork — not upstream, see below), or build them (below).
+   ([6.2-ds7](https://github.com/misaka5202/anland/releases/tag/6.2-ds7), this fork — not upstream, see below), or build them (below).
 2. Flash the zip in your root manager and reboot. The daemon starts at boot (log: `/data/local/tmp/awl_daemon.log`).
 3. Install `anland-wayland.apk`.
 4. Inside the container, set up the session:
@@ -151,6 +151,23 @@ tagged `6.2-dsN` and built from `main`.
 For terminals (no `text_input`), Chinese goes through the Wayland selection
 plus the terminal's paste shortcut — configurable as `paste_shortcut` in
 `config.json` (default `ctrl+shift+v`).
+
+## What changed after 6.2-ds6
+
+- **A window could stay half on the previous frame.** A freshly attached
+  `wl_shm` buffer is not the previous one with a few rects changed, so the SC
+  backend now re-uploads the whole texture on attach instead of only the damage
+  rect. This also explains text appearing to land only after the input box
+  closed.
+- **anland-shell taps did nothing.** `auto_attach` now defaults to on, so the
+  daemon starts the host activity as soon as a wayland window is created
+  instead of waiting for a binder SURFACE.
+- **Stale PulseAudio instances.** `service.sh` also kills the old server by
+  process name, so moving `runtime_dir` can no longer leave two servers holding
+  two Android tracks.
+- **Native PipeWire apps were silent.** `anlandx` installs a PipeWire tunnel
+  sink to the host PulseAudio, plus a watchdog that rebuilds it after a host
+  daemon restart.
 
 ## Build
 
