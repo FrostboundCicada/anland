@@ -100,7 +100,7 @@ flowchart LR
 ## 安装
 
 1. 取得三个产物：`anland-awl.zip`（模块）、`anland-wayland.apk`（宿主）、`anlandx.tar.gz`（容器会话）——从最新 Release
-   [6.2-ds7](https://github.com/misaka5202/anland/releases/tag/6.2-ds7)（**本 fork**，不是上游，原因见下）取，或自己构建（见下）。
+   [6.2-ds8](https://github.com/misaka5202/anland/releases/tag/6.2-ds8)（**本 fork**，不是上游，原因见下）取，或自己构建（见下）。
 2. 在 root 管理器里刷入 zip 并重启。守护进程开机自启（日志：`/data/local/tmp/awl_daemon.log`）。
 3. 安装 `anland-wayland.apk`。
 4. 在容器内搭建会话：
@@ -133,11 +133,17 @@ flowchart LR
 终端（无 `text_input`）的中文走 Wayland 选区 + 该终端的粘贴键，可在
 `config.json` 用 `paste_shortcut` 配置（默认 `ctrl+shift+v`）。
 
-## 6.2-ds6 之后的变化
+## 6.2-ds7 之后的变化
 
-- **窗口可能一半卡在上一个画面。** 新附着的 `wl_shm` buffer 不是「旧 buffer 改
-  了几个矩形」，所以 SC 后端改为在 attach 时整张纹理重传，而不是只传 damage
-  矩形。这也解释了「打完字要等输入框收起才上屏」。
+- **窗口可能一半卡在上一个画面。** `wl_surface.damage` 报的是 surface 坐标，
+  `wl_surface.damage_buffer` 报的是 buffer 坐标；之前 daemon 把 surface 坐标
+  的矩形当成 buffer 像素直接上传，于是缩放感知的客户端（zoom > 100% 的浏览器）
+  脏区落在了错误位置、大小也只有应有的一半——画布上出现错位方块。现在矩形会
+  按 buffer 网格换算（kwin 的 `mapToBuffer`）。合成器同时持有自己的画布
+  （kwin 的 `BufferImage`），脏区之外的像素在客户端换 buffer 后依然正确，上传
+  也只传脏区：比原先的整张重传少 15 倍流量。
+- **每帧都重发一遍没变的图层几何。** 位置、缩放、变换和透明度现在只在真正
+  变化时才下发，而不是每次 buffer latch 都重发。
 - **anland-shell 点应用没反应。** `auto_attach` 现在默认打开，daemon 在 wayland
   窗口创建时就直接拉起宿主 Activity，不再等 binder SURFACE。
 - **残留的 PulseAudio 实例。** `service.sh` 现在也按进程名杀掉旧服务器，

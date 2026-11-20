@@ -112,7 +112,7 @@ default `1`; applied when a window attaches):
 ## Install
 
 1. Get the three artifacts — `anland-awl.zip` (module), `anland-wayland.apk` (host), `anlandx.tar.gz` (container session). Take them from the latest release
-   ([6.2-ds7](https://github.com/misaka5202/anland/releases/tag/6.2-ds7), this fork — not upstream, see below), or build them (below).
+   ([6.2-ds8](https://github.com/misaka5202/anland/releases/tag/6.2-ds8), this fork — not upstream, see below), or build them (below).
 2. Flash the zip in your root manager and reboot. The daemon starts at boot (log: `/data/local/tmp/awl_daemon.log`).
 3. Install `anland-wayland.apk`.
 4. Inside the container, set up the session:
@@ -152,13 +152,21 @@ For terminals (no `text_input`), Chinese goes through the Wayland selection
 plus the terminal's paste shortcut — configurable as `paste_shortcut` in
 `config.json` (default `ctrl+shift+v`).
 
-## What changed after 6.2-ds6
+## What changed after 6.2-ds7
 
-- **A window could stay half on the previous frame.** A freshly attached
-  `wl_shm` buffer is not the previous one with a few rects changed, so the SC
-  backend now re-uploads the whole texture on attach instead of only the damage
-  rect. This also explains text appearing to land only after the input box
-  closed.
+- **A window could stay half on the previous frame.** `wl_surface.damage`
+  carries surface coordinates while `wl_surface.damage_buffer` carries buffer
+  coordinates; the daemon used the surface-space rectangle as buffer pixels, so
+  a scale-aware client (a browser at zoom > 100%) had its damage uploaded at the
+  wrong offset and at a fraction of the size — a misplaced block over the
+  canvas. The rectangle is now scaled into the buffer grid (kwin's
+  `mapToBuffer`). The compositor keeps its own canvas (kwin's `BufferImage`),
+  so the pixels outside the damage rect stay correct across the client's buffer
+  swap and only the damaged region is uploaded: 15x less traffic than the full
+  re-upload this replaces.
+- **Every frame re-sent an unchanged layer geometry.** The position, scale,
+  transform and transparency are now applied only when they actually change
+  instead of on every buffer latch.
 - **anland-shell taps did nothing.** `auto_attach` now defaults to on, so the
   daemon starts the host activity as soon as a wayland window is created
   instead of waiting for a binder SURFACE.
