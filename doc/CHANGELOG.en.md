@@ -7,8 +7,11 @@ Releases used to be tagged `6.2-dsN`, where `dsN` named the **Droidspaces
 release** the build targeted (`ds73` = Droidspaces 7.3) rather than a patch
 counter. Tags are now `vMAJOR.MINOR.PATCH` so the order is readable at a
 glance: `MAJOR.MINOR` follows upstream anland's 6.2 and `PATCH` continues the
-old `ds` count, so `6.2-ds1` became `v6.2.1`. The old tags and releases are
-kept as-is; their content is archived below.
+old `ds` count, so `6.2-ds1` became `v6.2.1`. Every release on the Releases
+page was renamed to a `vMAJOR.MINOR.PATCH` tag (the old `6.2-dsN` download
+links therefore no longer resolve); `6.2-ds8` had no separate entry because its
+content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
+content is archived below.
 
 ## 6.2.8 - 2026-11-20
 
