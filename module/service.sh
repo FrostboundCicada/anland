@@ -63,10 +63,19 @@ stop_pulse() {
   # The runtime copy is disposable, but the process must be stopped before it
   # is replaced.  Otherwise an old instance can keep the old UID/audio state
   # alive across a module update or an APK reinstall.
-  if pkill -f "$PAR/bin/pulseaudio" 2>/dev/null; then
+  #
+  # Match the process NAME too, not only "$PAR/bin/pulseaudio": when the
+  # runtime_dir moves (config edit, module update), the previous server keeps
+  # running with its old tree and its own socket — the path pattern cannot
+  # see it, so the new server coexists with a stale one, both holding an
+  # Android SLES track (device state before this fix: two pulseaudio
+  # instances, one on /data/local/tmp/pulse.sock and one on the old
+  # /data/local/tmp/awl/pulse.sock).
+  if pkill -x pulseaudio 2>/dev/null || pkill -f "$PAR/bin/pulseaudio" 2>/dev/null; then
     sleep 1
     # A stuck instance must not survive into the next attempt and race the
     # new server for the socket or AudioFlinger track.
+    pkill -KILL -x pulseaudio 2>/dev/null || true
     pkill -KILL -f "$PAR/bin/pulseaudio" 2>/dev/null || true
   fi
   rm -f "$RT/pulse.sock"
