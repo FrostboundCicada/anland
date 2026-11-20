@@ -1,0 +1,14 @@
+[Unit]
+Description=anland PipeWire tunnel sink watchdog
+# runs only when the tunnel drop-in exists (the script exits at once otherwise)
+After=pipewire.service pipewire-pulse.service wireplumber.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/anland-audio-watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

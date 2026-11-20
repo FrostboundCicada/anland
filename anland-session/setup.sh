@@ -86,6 +86,8 @@ if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$UNIT_DIR/anland-session.service" "$UNIT_DIR/anlandx.service" \
           "$BIN/anland-session" "$BIN/anlandx-start" "$BIN/anland-miniwm" \
           "$HOME/.anlandx" "$HOME/.anlandx-env"
+    systemctl --user disable --now anland-audio-watch.service 2>/dev/null || true
+    rm -f "$UNIT_DIR/anland-audio-watch.service" "$BIN/anland-audio-watch"
     remove_own_bwrap
     # patched Xwayland — the stamp file marks it as ours (never touch a user's own)
     if [ -f "$HOME/.anlandx-xwayland" ]; then
@@ -94,6 +96,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     fi
     systemctl --user daemon-reload
     strip_pulse_conf
+    rm -f "$HOME/.config/pipewire/pipewire.conf.d/anland-pulse-tunnel.conf"
     echo "anland session removed"
     exit 0
 fi
@@ -118,6 +121,8 @@ mkdir -p "$BIN" "$UNIT_DIR"
 cc -O2 -Wall -o "$BIN/anland-miniwm" miniwm.c -lX11 -lXcomposite
 install -m 755 anland-session.sh "$BIN/anland-session"
 install -m 644 anland-session.service "$UNIT_DIR/anland-session.service"
+install -m 755 anland-audio-watch "$BIN/anland-audio-watch"
+install -m 644 anland-audio-watch.service "$UNIT_DIR/anland-audio-watch.service"
 
 # bwrap with the mountinfo index fix — installed unconditionally: the fixed
 # lookup (sorted array + bsearch) is identical to upstream's table on normal
@@ -187,6 +192,46 @@ if [ -S "$PULSE_SOCK" ]; then
     echo "pulse: client.conf → unix:$PULSE_SOCK (socket present)"
 else
     echo "pulse: client.conf → unix:$PULSE_SOCK (socket NOT present yet — host daemon module without pulse/, or not started)"
+fi
+
+# PipeWire: the client.conf above only steers libpulse clients. Native PipeWire
+# clients (pw-cat/pw-play, OBS, games, Plasma's own event sounds) speak the
+# PipeWire protocol to the container core, whose only real sink is the
+# auto_null fallback — silent. Give the core a sink that tunnels to the host
+# PulseAudio over the same socket: it is the only real sink, so WirePlumber
+# picks it as the default and those apps play through Android as well.
+# Best effort: a container without PipeWire (or without the tunnel module)
+# keeps its previous behaviour — the drop-in is simply not written.
+PW_CONF_DIR=$HOME/.config/pipewire/pipewire.conf.d
+PW_CONF=$PW_CONF_DIR/anland-pulse-tunnel.conf
+PW_MODULE=""
+for d in /usr/lib/aarch64-linux-gnu/pipewire-0.3 /usr/lib/x86_64-linux-gnu/pipewire-0.3 \
+         /usr/lib/pipewire-0.3 /usr/lib64/pipewire-0.3; do
+    [ -f "$d/libpipewire-module-pulse-tunnel.so" ] && PW_MODULE="$d/libpipewire-module-pulse-tunnel.so" && break
+done
+if [ -n "$PW_MODULE" ] && command -v pipewire >/dev/null 2>&1; then
+    mkdir -p "$PW_CONF_DIR"
+    cat > "$PW_CONF" <<EOF
+context.modules = [
+    { name = libpipewire-module-pulse-tunnel
+      args = {
+          tunnel.mode = "sink"
+          pulse.server.address = "unix:$PULSE_SOCK"
+          node.name = "anland"
+          node.description = "Android (anland)"
+      }
+    }
+]
+EOF
+    # the core reads its config at start: restart the audio stack so the
+    # tunnel comes up now (and on every session install/upgrade)
+    systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
+    # ...and keep it up: the tunnel dies with its host connection, so a
+    # daemon restart needs the watchdog to rebuild it (no session restart)
+    systemctl --user enable --now anland-audio-watch.service 2>/dev/null || true
+    echo "pipewire: anland tunnel sink → unix:$PULSE_SOCK"
+else
+    echo "pipewire: skipped (no libpipewire-module-pulse-tunnel in this container)"
 fi
 
 # keep the user manager (and with it this service) alive without an open
