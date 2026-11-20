@@ -25,7 +25,7 @@ if [ ! -f "$MODPATH/config.json" ]; then
     _src=$(printf '%s\n' "$_binds" | tr ',' '\n' | sed -n 's/^\(.*\):\/run\/anland$/\1/p' | head -1)
     case "$_src" in /*) _rt="$_src" ;; esac
   fi
-  printf '{\n  "runtime_dir": "%s"\n}\n' "$_rt" > "$MODPATH/config.json"
+  printf '{\n  "auto_attach": 1,\n  "runtime_dir": "%s"\n}\n' "$_rt" > "$MODPATH/config.json"
 fi
 
 PLAT_CTX_SRC=/system/etc/selinux/plat_service_contexts
