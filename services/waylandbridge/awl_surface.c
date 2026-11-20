@@ -177,6 +177,16 @@ void awl_surface_apply_buffer(struct awl_surface* s, struct wl_resource* res,
         s->shm_release_res = release_res;
         s->shm_live = 1;
         s->shm_serial++;
+        /* A NEW shm buffer is not the previous one with a few rects changed:
+         * the area outside the commit's damage is undefined content of the new
+         * buffer, so the consumer must re-upload the whole texture. Without
+         * this, a client that cycles shm buffers (Chrome's software rasterizer
+         * does) with a partial damage leaves the last frame's pixels outside
+         * the damage rect on screen — the "half the window stuck on the
+         * previous frame" artefact. In-place redraws of the SAME buffer still
+         * carry only the damage rect (shm_damaged_locked, no attach). */
+        s->cd_state = AWL_DMG_FULL;
+        s->cur_damage_x = s->cur_damage_y = s->cur_damage_w = s->cur_damage_h = 0;
         if (s->q_last_dmabuf) q_push_null(s);   /* the consumer must drop the dmabuf head */
         return;
     }
