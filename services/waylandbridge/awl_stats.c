@@ -15,6 +15,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define AWL_TAG "anland-stats"
@@ -57,6 +58,13 @@ static const char* const k_names[AWL_ST_MAX] = {
     [AWL_ST_SURF_W]         = "surf_w",
     [AWL_ST_SURF_H]         = "surf_h",
     [AWL_ST_VP_DST]         = "vp_dst",
+    [AWL_ST_T_SNAPSHOT]     = "t_snap_ms",
+    [AWL_ST_T_QUEUE]        = "t_queue_ms",
+    [AWL_ST_T_UPLOAD]       = "t_upload_ms",
+    [AWL_ST_T_LATCH]        = "t_latch_ms",
+    [AWL_ST_T_APPLY]        = "t_apply_ms",
+    [AWL_ST_PASS_GEOM_ONLY] = "p_geom",
+    [AWL_ST_GEO_CHANGED]    = "geo_chg",
 };
 
 int awl_stats_enabled(void) {
@@ -70,6 +78,16 @@ int awl_stats_enabled(void) {
 void awl_stats_add(int id, uint64_t n) {
     if (id < 0 || id >= AWL_ST_MAX) return;
     atomic_fetch_add_explicit(&g_cnt[id], n, memory_order_relaxed);
+}
+
+void awl_stats_add_elapsed(int id, const struct timespec* start) {
+    if (id < 0 || id >= AWL_ST_MAX) return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    atomic_fetch_add_explicit(&g_cnt[id],
+        (uint64_t)((now.tv_sec - start->tv_sec) * 1000000000LL +
+                   (now.tv_nsec - start->tv_nsec)),
+        memory_order_relaxed);
 }
 
 uint64_t awl_stats_get(int id) {

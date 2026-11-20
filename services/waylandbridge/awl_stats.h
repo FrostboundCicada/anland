@@ -60,6 +60,13 @@ enum awl_stat_id {
     AWL_ST_SURF_W,           /* the surface logical width of the last shm frame */
     AWL_ST_SURF_H,           /* the surface logical height of the last shm frame */
     AWL_ST_VP_DST,           /* frames with a viewport destination set */
+    AWL_ST_T_SNAPSHOT,       /* ns in the layer snapshot (get_layers + cursor) */
+    AWL_ST_T_QUEUE,          /* ns in the queue drain/head handling */
+    AWL_ST_T_UPLOAD,         /* ns in the shm upload */
+    AWL_ST_T_LATCH,          /* ns in the latch (blit + setBuffer) */
+    AWL_ST_T_APPLY,          /* ns in the transaction apply */
+    AWL_ST_PASS_GEOM_ONLY,   /* passes that applied geometry without a new buffer */
+    AWL_ST_GEO_CHANGED,      /* geometry updates that actually changed something */
     AWL_ST_MAX
 };
 
@@ -90,5 +97,33 @@ static inline int awl_stats_enabled(void) { return 0; }
 static inline void awl_stats_start(void) { }
 
 #endif /* AWL_STATS */
+
+/* Timing helpers: with AWL_STATS off, AWL_TS declares nothing and
+ * AWL_TS_ADD folds to a no-op whose arguments (the start variable) are
+ * dropped — the production build carries no clock_gettime at the
+ * measurement points at all. */
+#ifdef AWL_STATS
+
+#include <time.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* read CLOCK_MONOTONIC now and add (now − start) ns to the counter */
+void awl_stats_add_elapsed(int id, const struct timespec* start);
+#ifdef __cplusplus
+}
+#endif
+
+#define AWL_TS(name) \
+    struct timespec name; clock_gettime(CLOCK_MONOTONIC, &(name))
+#define AWL_TS_ADD(id, start) awl_stats_add_elapsed((id), &(start))
+
+#else   /* !AWL_STATS — no timing at all */
+
+#define AWL_TS(name) ((void)0)
+#define AWL_TS_ADD(id, start) ((void)0)
+
+#endif /* AWL_STATS timing helpers */
 
 #endif /* AWL_STATS_H */

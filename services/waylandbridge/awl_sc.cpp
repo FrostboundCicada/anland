@@ -420,6 +420,7 @@ struct sc_rlayer {
     bool gcrop : 1;
     /* last applied geometry (skip unchanged) */
     int32_t gx = 0, gy = 0, gw = 0, gh = 0;
+    float gscx = 0, gscy = 0;     /* the applied scale (float: what SF got) */
     int32_t gxform = -1;
     int32_t gcrop_l = 0, gcrop_t = 0, gcrop_r = 0, gcrop_b = 0;
 };
@@ -722,17 +723,31 @@ static void mode_set(sc_window* w, sc_rlayer* L, sc_mode m, const char* why) {
 }
 
 /* Everything a new latch has in common: the previous buffer retires, the
- * layer shows if it was hidden, geometry re-applies against the new dims. */
+ * layer shows if it was hidden, geometry re-applies against the new dims.
+ *
+ * The geometry is invalidated only when the latched DIMS change: the scale
+ * (scx/scy) is derived from the buffer size, so a buffer of the same size
+ * keeps the same scale. Everything else the geometry block compares (the
+ * position, the extent, the transform, the opacity, the crop) is compared
+ * against the last applied values — with the geometry left valid, an
+ * unchanged surface sends nothing.
+ *
+ * Before, geo_valid was cleared on every latch, so the comparison never ran
+ * and every latch re-sent the position/scale/transform/transparency — and
+ * the vsync tick that followed the off-tick latch found the geometry
+ * "invalid" again and applied a second transaction per frame for nothing
+ * (measured: 821 applies for 601 frames, geo_chg == the number of applies). */
 static void latched_common(sc_txn* ctx, ASurfaceTransaction* txn, sc_rlayer* L,
                            uint32_t bw, uint32_t bh, uint32_t bfmt) {
     (void)ctx;
     if (!L->has_buffer)
         ASurfaceTransaction_setVisibility(txn, L->sc, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
     L->has_buffer = true;
+    if (L->bw != bw || L->bh != bh)
+        L->geo_valid = false;   /* the scale may have changed */
     L->bw = bw;
     L->bh = bh;
     L->bfmt = bfmt;
-    L->geo_valid = false;
 }
 
 /* SCANOUT: the client element itself, forged. false = forge refused (retry
@@ -832,8 +847,8 @@ static void latch_hide(ASurfaceTransaction* txn, sc_txn* ctx, sc_rlayer* L, bool
 
 static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_id,
                              bool tick, std::vector<uint64_t>* done) {
-    struct timespec t0, t1;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
+    AWL_TS(t0);
+    AWL_TS(ts0);
     awl_stats_add(AWL_ST_SC_PASS, 1);
     awl_layer_info_t lay[AWL_MAX_LAYERS + 1];
     int n = awl_surface_get_layers(w->id, lay, AWL_MAX_LAYERS);
@@ -841,6 +856,7 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
     if (awl_pointer_cursor_layer(w->id, &lay[n])) n++;
     awl_view_xform_t xf;
     awl_surface_get_view_xform(w->id, &xf);
+    AWL_TS_ADD(AWL_ST_T_SNAPSHOT, ts0);
 
     std::unique_lock<std::mutex> lk(w->m);
     if (w->dead || !w->nw) return false;
@@ -851,6 +867,7 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
     awl_stats_add(AWL_ST_TXN_CREATE, 1);
     sc_txn* ctx = new sc_txn();
     bool any = false;
+    bool latched_any = false;
 
     for (int i = 0; i < n; i++) {
         auto it = w->layers.find(lay[i].surface_id);
@@ -867,6 +884,7 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
         int pending = 0;
         int wfd = -1;   /* readiness fd of the frame this pass may fail to latch (watch_arm) */
         unsigned sup = L->sup_last;
+        AWL_TS(tq0);
         struct awl_bufferqueue* q = awl_surface_queue_ref(lay[i].surface_id);
         if (q) {
             awl_bufferqueue_lock(q);
@@ -880,6 +898,7 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
             sup = awl_bufferqueue_superseded(q);
             awl_bufferqueue_unref(q);
         }
+        AWL_TS_ADD(AWL_ST_T_QUEUE, tq0);
         /* hold: the client's NEWEST frame is not latchable this pass — the
          * head's own fence is pending (incomplete), or a complete head has
          * incomplete newer frame(s) behind it (drain stops at the first
@@ -987,6 +1006,7 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
              * canvas — kwin's BufferImage). */
             awl_shm_frame_t f;
             uint64_t cur_serial = 0;
+            AWL_TS(tu0);
             int r = awl_surface_shm_begin(lay[i].surface_id, L->shm.serial, &f);
             if (r == 1) {
                 cur_serial = L->shm.serial;
@@ -1007,13 +1027,17 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
             if (L->shm.texture &&
                 (L->mode != SC_MODE_EGL_SHM || L->egl_seq != cur_serial)) {
                 int rel = -1;
+                AWL_TS(tl0);
                 if (latch_egl(w.get(), L, txn, ctx, L->shm.texture, L->shm.w, L->shm.h,
                               L->shm.format, SC_MODE_EGL_SHM, "wl_shm source", &rel)) {
                     L->egl_seq = cur_serial;
                     latched = true;
+                    latched_any = true;
                 }
+                AWL_TS_ADD(AWL_ST_T_LATCH, tl0);
                 if (rel >= 0) close(rel);   /* shm was released at upload; the GPU owns the copy */
             }
+            AWL_TS_ADD(AWL_ST_T_UPLOAD, tu0);
         }
         if (wfd >= 0) {
             if (!latched) watch_arm(w, wfd);   /* wake for the frame we could not take */
@@ -1028,8 +1052,7 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
          * lay[i] is the logic layer's NEWEST state; when that commit's frame
          * is still pending (hold) its position/size must wait for it too —
          * moving the OLD buffer to the NEW position is a one-frame content/
-         * position skew that a scrolling client shows as judder. The latch
-         * re-applies geometry anyway (latched_common clears geo_valid). */
+         * position skew that a scrolling client shows as judder. */
         if (hold && !latched) continue;
         double rsw, rsh;
         awl_layer_sampled(&lay[i], L->bw, L->bh, &rsw, &rsh);
@@ -1067,7 +1090,13 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
         }
         int32_t Xi = (int32_t)lround(X);
         int32_t Yi = (int32_t)lround(Y);
+        /* The scale is part of the geometry: it is derived from the latched
+         * buffer size (scx = Wd / rsw), so it must be compared too — a
+         * buffer that changes its size changes the scale even when the
+         * logical rect stays the same. */
+        float fscx = (float)scx, fscy = (float)scy;
         if (!L->geo_valid || Xi != L->gx || Yi != L->gy || Wd != L->gw || Hd != L->gh ||
+            fscx != L->gscx || fscy != L->gscy ||
             atr != L->gxform || opaque != L->gopaque || has_crop != L->gcrop ||
             cl != L->gcrop_l || ct != L->gcrop_t || cr != L->gcrop_r || cb != L->gcrop_b) {
             ASurfaceTransaction_setPosition(txn, L->sc, Xi, Yi);
@@ -1084,7 +1113,9 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
                 ASurfaceTransaction_setCrop(txn, L->sc, none);
             }
             L->geo_valid = true;
+            awl_stats_add(AWL_ST_GEO_CHANGED, 1);
             L->gx = Xi; L->gy = Yi; L->gw = Wd; L->gh = Hd;
+            L->gscx = fscx; L->gscy = fscy;
             L->gxform = atr; L->gopaque = opaque;
             L->gcrop = has_crop;
             L->gcrop_l = cl; L->gcrop_t = ct; L->gcrop_r = cr; L->gcrop_b = cb;
@@ -1099,18 +1130,20 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
             delete ctx;
         if (vsync_id && g_api.sdk >= 33)
             ASurfaceTransaction_setFrameTimeline(txn, vsync_id);
+        AWL_TS(ta0);
         ASurfaceTransaction_apply(txn);
+        AWL_TS_ADD(AWL_ST_T_APPLY, ta0);
     } else {
         delete ctx;
     }
     ASurfaceTransaction_delete(txn);
     awl_stats_add(AWL_ST_SC_LAYERS, (uint64_t)n);
-    if (any) { awl_stats_add(AWL_ST_SC_APPLY, 1); awl_stats_add(AWL_ST_PASS_APPLY, 1); }
-    else awl_stats_add(AWL_ST_PASS_NOOP, 1);
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    awl_stats_add(AWL_ST_SC_PASS_NS,
-                  (uint64_t)((t1.tv_sec - t0.tv_sec) * 1000000000LL +
-                             (t1.tv_nsec - t0.tv_nsec)));
+    if (any) {
+        awl_stats_add(AWL_ST_SC_APPLY, 1);
+        awl_stats_add(AWL_ST_PASS_APPLY, 1);
+        if (!latched_any) awl_stats_add(AWL_ST_PASS_GEOM_ONLY, 1);
+    } else awl_stats_add(AWL_ST_PASS_NOOP, 1);
+    AWL_TS_ADD(AWL_ST_SC_PASS_NS, t0);
     return any;
 }
 
