@@ -56,7 +56,14 @@
  * Render-thread only per window. */
 struct wl_layer {
     struct awl_ahb_cache* cache = nullptr;
+    /* The compositor's own copy of the surface's canvas (kwin's
+     * BufferImage): ONE texture per surface, updated with the damage rect
+     * only — the pixels outside the rect are already in it. */
     awl_gl_shm_tex shm;
+    /* The dmabuf CPU fallback (no AHB, no dmabuf import) copies the client's
+     * buffer into a texture of its own — it holds dma-buf content, not shm
+     * content, so it does not share the surface's canvas texture. */
+    awl_gl_shm_tex cpu_tex;
     bool cpu_dmabuf = false;      /* sticky after vendor AHB forging is incompatible */
 };
 
@@ -94,6 +101,7 @@ static void layer_release(wl_layer* l) {
         l->cache = nullptr;
     }
     awl_gl_shm_release(&l->shm);
+    awl_gl_shm_release(&l->cpu_tex);
 }
 
 /* ---------------- per-window GL ---------------- */
@@ -196,14 +204,14 @@ static GLuint dmabuf_cpu_texture(wl_layer* l, const struct awl_bq_buffer* b) {
     f.format = b->format;
     f.pixels = pixels;
     f.dmg_full = 1;
-    f.serial = l->shm.serial + 1;
-    bool ok = awl_gl_shm_update(&l->shm, &f);
+    f.serial = l->cpu_tex.serial + 1;
+    bool ok = awl_gl_shm_update(&l->cpu_tex, &f);
     munmap(pixels, bytes);
     if (cpu_sync) {
         sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
         ioctl(b->dmabuf_fd, DMA_BUF_IOCTL_SYNC, &sync);
     }
-    return ok ? l->shm.texture : 0;
+    return ok ? l->cpu_tex.texture : 0;
 }
 
 /* Detach and reclaim a window entry (map removal inside g_map_lock, join/free
@@ -410,7 +418,9 @@ static void render_frame(wl_window* w) {
         } else {
             /* no dmabuf frame: wl_shm content? 1 = upload the damage rect
              * from the client's pool (surface locked until end), 2 =
-             * unchanged (keep the texture), 0 = no shm content */
+             * unchanged (keep the texture), 0 = no shm content.
+             * The compositor's canvas: one texture per surface, updated with
+             * the damage rect only (kwin's BufferImage). */
             awl_shm_frame_t f;
             int r = awl_surface_shm_begin(lay[i].surface_id, l.shm.serial, &f);
             if (r == 1) {

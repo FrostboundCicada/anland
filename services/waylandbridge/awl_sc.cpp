@@ -104,6 +104,7 @@
 #include "awl_gl.hpp"
 #include "awl_geom.h"
 #include "awl_bufferqueue.h"
+#include "awl_stats.h"
 
 #include <android/api-level.h>
 #include <android/choreographer.h>
@@ -386,7 +387,12 @@ struct sc_rlayer {
     uint64_t egl_seq = 0;                      /* EGL*: identity of the source rendered into it
                                                 * (element seq / shm serial) */
     struct awl_ahb_cache* ahb = nullptr;       /* forge cache: SCANOUT handles / EGL source textures */
-    awl_gl_shm_tex shm;                        /* EGL_SHM: upload texture */
+    /* EGL_SHM: the compositor's own copy of the surface's canvas (kwin's
+     * BufferImage): ONE texture per surface. The client's attached buffer
+     * is sampled only inside the damage rect; the rest of the texture keeps
+     * the canvas. A client that cycles buffers (every browser) therefore
+     * costs one damage-rect upload per frame instead of a full upload. */
+    awl_gl_shm_tex shm;
     uint32_t bw = 0, bh = 0, bfmt = 0;         /* latched content: buffer dims + fourcc (geometry inputs) */
     unsigned stall = 0;                        /* consecutive vsyncs the head was incomplete */
     unsigned skips = 0;                        /* EGL frames skipped for want of a free slot */
@@ -642,8 +648,10 @@ static void layer_retire_locked(sc_sync_txn& st, sc_rlayer* L) {
  * and at attach — cheap when nothing changed (snapshot + map walk, no
  * transaction). */
 static void sc_sync_window(const std::shared_ptr<sc_window>& w) {
+    awl_stats_add(AWL_ST_SYNC_CALLS, 1);
     awl_layer_info_t lay[AWL_MAX_LAYERS + 1];
     int n = awl_surface_get_layers(w->id, lay, AWL_MAX_LAYERS);
+    awl_stats_add(AWL_ST_SYNC_WALKED, (uint64_t)n);
     if (n < 0) n = 0;
     if (n > 0 && awl_pointer_cursor_layer(w->id, &lay[n])) n++;   /* cursor: topmost */
 
@@ -824,6 +832,9 @@ static void latch_hide(ASurfaceTransaction* txn, sc_txn* ctx, sc_rlayer* L, bool
 
 static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_id,
                              bool tick, std::vector<uint64_t>* done) {
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    awl_stats_add(AWL_ST_SC_PASS, 1);
     awl_layer_info_t lay[AWL_MAX_LAYERS + 1];
     int n = awl_surface_get_layers(w->id, lay, AWL_MAX_LAYERS);
     if (n <= 0) return false;
@@ -837,6 +848,7 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
     w->frame_clock++;
 
     ASurfaceTransaction* txn = ASurfaceTransaction_create();
+    awl_stats_add(AWL_ST_TXN_CREATE, 1);
     sc_txn* ctx = new sc_txn();
     bool any = false;
 
@@ -968,10 +980,16 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
              * under explicit sync flickered/juddered while static content
              * (no commits) looked fine. */
         } else {
-            /* ---- no dmabuf frame: wl_shm content? ---- */
+            /* ---- no dmabuf frame: wl_shm content? ----
+             * The compositor's canvas: one texture per surface, updated with
+             * the damage rect only. The client's attached buffer is sampled
+             * inside that rect (the pixels outside it are already in the
+             * canvas — kwin's BufferImage). */
             awl_shm_frame_t f;
+            uint64_t cur_serial = 0;
             int r = awl_surface_shm_begin(lay[i].surface_id, L->shm.serial, &f);
             if (r == 1) {
+                cur_serial = L->shm.serial;
                 bool ok = gl_ensure() && awl_gl_shm_update(&L->shm, &f);
                 awl_surface_shm_end(&f, ok);   /* consumed → the client gets wl_buffer.release */
                 if (!ok) {
@@ -987,11 +1005,11 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
                 continue;
             }
             if (L->shm.texture &&
-                (L->mode != SC_MODE_EGL_SHM || L->egl_seq != L->shm.serial)) {
+                (L->mode != SC_MODE_EGL_SHM || L->egl_seq != cur_serial)) {
                 int rel = -1;
                 if (latch_egl(w.get(), L, txn, ctx, L->shm.texture, L->shm.w, L->shm.h,
                               L->shm.format, SC_MODE_EGL_SHM, "wl_shm source", &rel)) {
-                    L->egl_seq = L->shm.serial;
+                    L->egl_seq = cur_serial;
                     latched = true;
                 }
                 if (rel >= 0) close(rel);   /* shm was released at upload; the GPU owns the copy */
@@ -1086,6 +1104,13 @@ static bool sc_render_window(const std::shared_ptr<sc_window>& w, int64_t vsync_
         delete ctx;
     }
     ASurfaceTransaction_delete(txn);
+    awl_stats_add(AWL_ST_SC_LAYERS, (uint64_t)n);
+    if (any) { awl_stats_add(AWL_ST_SC_APPLY, 1); awl_stats_add(AWL_ST_PASS_APPLY, 1); }
+    else awl_stats_add(AWL_ST_PASS_NOOP, 1);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    awl_stats_add(AWL_ST_SC_PASS_NS,
+                  (uint64_t)((t1.tv_sec - t0.tv_sec) * 1000000000LL +
+                             (t1.tv_nsec - t0.tv_nsec)));
     return any;
 }
 

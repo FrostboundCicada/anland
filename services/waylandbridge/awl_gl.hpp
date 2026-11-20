@@ -94,11 +94,19 @@ GLuint awl_gl_slot_texture(struct awl_ahb_slot* s);   /* 0 = import failed (slot
  * (glTexSubImage2D straight from the client's pool: one CPU→GPU copy, no
  * intermediate buffer). BGRA memory order → GL_BGRA_EXT upload
  * (GL_EXT_texture_format_BGRA8888; RGBA + texture swizzle when absent).
- * `serial` = the frame serial the texture reflects (pass to begin). */
+ * `serial` = the frame serial the texture reflects (pass to begin).
+ *
+ * THE CANVAS (kwin BufferImage): the texture holds the compositor's OWN copy
+ * of the surface's content, not the client's buffer. The client's attached
+ * buffer is sampled only inside the damage rect; the pixels outside it are
+ * already in the texture. A client that cycles buffers (every browser)
+ * therefore costs one damage-rect upload per frame instead of a full upload
+ * of the surface — and the canvas keeps showing the right content across the
+ * buffer swap. */
 struct awl_gl_shm_tex {
     GLuint texture = 0;
     uint32_t w = 0, h = 0, format = 0;
-    uint64_t serial = 0;
+    uint64_t serial = 0;      /* the shm serial this texture reflects */
 };
 struct awl_shm_frame;
 bool awl_gl_shm_update(awl_gl_shm_tex* t, const struct awl_shm_frame* f);

@@ -360,6 +360,8 @@ typedef struct awl_shm_frame {
     int32_t dmg_x, dmg_y, dmg_w, dmg_h;
     uint64_t serial;                  /* pass back as have_serial next time */
     void* priv;
+    /* The damage rect is in the BUFFER's pixel grid (the surface-coordinate
+     * form is converted by the logic layer, kwin's mapToBuffer). */
 } awl_shm_frame_t;
 int  awl_surface_shm_begin(uint64_t id, uint64_t have_serial, awl_shm_frame_t* f);
 void awl_surface_shm_end(awl_shm_frame_t* f, int consumed);

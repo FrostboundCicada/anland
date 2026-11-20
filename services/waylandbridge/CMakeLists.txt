@@ -12,6 +12,15 @@ set(CMAKE_CXX_STANDARD 17)
 # is ON. Release builds (`make native`) leave it OFF; `make native-debug`
 # enables it. LOGI/LOGE are always kept.
 option(AWL_LOG_DEBUG "Compile LOGD hot-path tracing into the binaries" OFF)
+# Pipeline counters (awl_stats.h) are compiled out unless this is ON: the
+# production binary carries no instrumentation at all. With it ON the daemon
+# dumps a per-interval summary to logcat (tag "anland-stats") when the
+# environment variable AWL_STATS=1 is set — the measurement that located the
+# surface-vs-buffer damage bug (see awl_damage_to_buffer).
+option(AWL_STATS "Compile the pipeline counters into the daemon" OFF)
+if(AWL_STATS)
+  add_compile_definitions(AWL_STATS)
+endif()
 if(AWL_LOG_DEBUG)
   add_compile_definitions(AWL_LOG_DEBUG)
 endif()
@@ -336,6 +345,7 @@ add_executable(waylandbridge
   awl_icon.c
   awl_sched.c
   awl_bufferqueue.c
+  awl_stats.c
   awl_esync.c
   ${AWL_GENERATED}/linux-explicit-synchronization-unstable-v1-protocol.c
   ${AWL_GENERATED}/linux-explicit-synchronization-unstable-v1-server-protocol.h

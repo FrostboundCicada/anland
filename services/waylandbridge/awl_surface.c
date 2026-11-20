@@ -24,6 +24,7 @@
  *        → g_bufref_lock (leaf, buffer liveness).
  */
 #include "awl_internal.h"
+#include "awl_stats.h"
 
 #include <fcntl.h>
 #include <string.h>
@@ -177,16 +178,12 @@ void awl_surface_apply_buffer(struct awl_surface* s, struct wl_resource* res,
         s->shm_release_res = release_res;
         s->shm_live = 1;
         s->shm_serial++;
-        /* A NEW shm buffer is not the previous one with a few rects changed:
-         * the area outside the commit's damage is undefined content of the new
-         * buffer, so the consumer must re-upload the whole texture. Without
-         * this, a client that cycles shm buffers (Chrome's software rasterizer
-         * does) with a partial damage leaves the last frame's pixels outside
-         * the damage rect on screen — the "half the window stuck on the
-         * previous frame" artefact. In-place redraws of the SAME buffer still
-         * carry only the damage rect (shm_damaged_locked, no attach). */
-        s->cd_state = AWL_DMG_FULL;
-        s->cur_damage_x = s->cur_damage_y = s->cur_damage_w = s->cur_damage_h = 0;
+        /* The attached buffer becomes the surface's current buffer. The
+         * compositor's canvas keeps the content of the previous buffer
+         * (kwin's BufferImage: the canvas is the compositor's own copy), so
+         * re-attaching a different buffer does NOT invalidate it — only the
+         * damage rect of this commit has to be uploaded. */
+        awl_stats_add(AWL_ST_ATTACH_SAMEBUF, 1);
         if (s->q_last_dmabuf) q_push_null(s);   /* the consumer must drop the dmabuf head */
         return;
     }
@@ -712,6 +709,13 @@ static void surface_damage(struct wl_client* client, struct wl_resource* res,
                            int32_t x, int32_t y, int32_t w, int32_t h) {
     struct awl_surface* s = wl_resource_get_user_data(res);
     if (!s) return;
+    awl_stats_add(AWL_ST_DMG_RECT, 1);
+    awl_stats_add(AWL_ST_DMG_SURFACE, 1);
+    s->pd_surface = 1;   /* surface coordinates (see pd_surface) */
+    awl_stats_add(AWL_ST_DMG_W, (uint64_t)(w > 0 ? w : 0));
+    awl_stats_add(AWL_ST_DMG_H, (uint64_t)(h > 0 ? h : 0));
+    if (w > 0 && h > 0)
+        awl_stats_add(AWL_ST_DMG_AREA, (uint64_t)w * (uint64_t)h);
     /* Accumulate bounding box (surface coordinates; extendable to a rectangle list in production) */
     if (s->pending_damage_empty) {
         s->pd_x = x; s->pd_y = y; s->pd_w = w; s->pd_h = h;
@@ -729,7 +733,11 @@ static void surface_damage(struct wl_client* client, struct wl_resource* res,
 static void surface_damage_buffer(struct wl_client* client,
                                   struct wl_resource* res,
                                   int32_t x, int32_t y, int32_t w, int32_t h) {
-    /* buffer-coordinate damage (only differs when scale≠1, equivalent at scale=1) */
+    /* Buffer-coordinate damage: the rect is already in the buffer's pixel
+     * grid — no scaling (this is the request a scale-aware client uses). */
+    awl_stats_add(AWL_ST_DMG_BUFFER, 1);
+    struct awl_surface* s = wl_resource_get_user_data(res);
+    if (s) s->pd_surface = 0;
     surface_damage(client, res, x, y, w, h);
 }
 
@@ -742,25 +750,86 @@ static void surface_damage_buffer(struct wl_client* client,
  * changes nothing and keeps the state (otherwise every ack_configure would
  * force a full re-upload). Caller holds s->ev_lock (surface_commit immediate
  * path + sync-subsurface latch apply, awl_subsurface.c). */
+/* Surface coordinates → buffer pixels (kwin's mapToBuffer).
+ *
+ * A surface-coordinate damage rect must be scaled by the ratio between the
+ * buffer's pixel grid and the surface's logical size: a scale-aware client
+ * at zoom 200% renders logical×2 into its buffer but reports the damage in
+ * logical pixels. Uploading the rect unscaled puts it at the wrong place
+ * and at half the size — the "half the window stuck on the previous frame"
+ * artefact (measured on Chrome: buffer 16528×11472, surface 8264×5736,
+ * damage 4132×2868 in surface pixels).
+ *
+ * The ratio comes from the viewport destination (the logical size the
+ * client asked for) or, without one, from the buffer size itself (ratio 1).
+ */
+void awl_damage_to_buffer(struct awl_surface* s, int32_t* x, int32_t* y,
+                           int32_t* w, int32_t* h) {
+    float lw = 0, lh = 0;
+    awl_surface_logical_size(s, &lw, &lh);
+    if (lw <= 0.5f || lh <= 0.5f) return;   /* no logical size: keep the rect */
+    uint32_t bw = 0, bh = 0;
+    {
+        struct wl_resource* br = s->current_buffer_res;
+        if (!br) return;
+        struct wl_shm_buffer* shm = wl_shm_buffer_get(br);
+        if (shm) {
+            bw = (uint32_t)wl_shm_buffer_get_width(shm);
+            bh = (uint32_t)wl_shm_buffer_get_height(shm);
+        }
+    }
+    if (!bw || !bh) return;
+    double rx = (double)bw / (double)lw;
+    double ry = (double)bh / (double)lh;
+    /* A ratio of 1 means the buffer IS the surface grid (a scale-1 client):
+     * nothing to convert. */
+    if (rx > 0.999 && rx < 1.001 && ry > 0.999 && ry < 1.001) return;
+    double nx = *x * rx, ny = *y * ry;
+    double nw = *w * rx, nh = *h * ry;
+    /* round outward: the rect must cover every pixel the client dirtied */
+    double x0 = floor(nx), y0 = floor(ny);
+    double x1 = ceil(nx + nw), y1 = ceil(ny + nh);
+    if (x1 > (double)bw) x1 = (double)bw;
+    if (y1 > (double)bh) y1 = (double)bh;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    *x = (int32_t)x0;
+    *y = (int32_t)y0;
+    *w = (int32_t)(x1 - x0);
+    *h = (int32_t)(y1 - y0);
+}
+
 void awl_damage_merge_pending(struct awl_surface* s, int has_attach) {
+    /* The surface's own damage state: what the backend still has to upload
+     * into the surface's canvas (kwin's SurfaceState::bufferDamage). */
+    struct awl_dmg_state* d = &s->dmg;
     if (s->pending_damage_empty) {
         if (!has_attach) return;   /* empty commit: nothing changed */
-        s->cd_state = AWL_DMG_FULL;
-    } else if (s->cd_state == AWL_DMG_NONE) {
-        s->cur_damage_x = s->pd_x;
-        s->cur_damage_y = s->pd_y;
-        s->cur_damage_w = s->pd_w;
-        s->cur_damage_h = s->pd_h;
-        s->cd_state = AWL_DMG_RECT;
-    } else if (s->cd_state == AWL_DMG_RECT) {   /* bbox union */
-        int32_t x2 = s->cur_damage_x + s->cur_damage_w;
-        int32_t y2 = s->cur_damage_y + s->cur_damage_h;
-        if (s->pd_x < s->cur_damage_x) s->cur_damage_x = s->pd_x;
-        if (s->pd_y < s->cur_damage_y) s->cur_damage_y = s->pd_y;
-        if (s->pd_x + s->pd_w > x2) x2 = s->pd_x + s->pd_w;
-        if (s->pd_y + s->pd_h > y2) y2 = s->pd_y + s->pd_h;
-        s->cur_damage_w = x2 - s->cur_damage_x;
-        s->cur_damage_h = y2 - s->cur_damage_y;
+        /* An attach with no damage report means "the whole surface" — the
+         * protocol default (the client gave no information). */
+        d->dmg_state = AWL_DMG_FULL;
+        return;
+    }
+    /* Convert a surface-coordinate rect into the buffer's pixel grid
+     * before it is merged (kwin's mapToBuffer). */
+    int32_t mx = s->pd_x, my = s->pd_y, mw = s->pd_w, mh = s->pd_h;
+    if (s->pd_surface)
+        awl_damage_to_buffer(s, &mx, &my, &mw, &mh);
+    if (d->dmg_state == AWL_DMG_NONE) {
+        d->dmg_x = mx;
+        d->dmg_y = my;
+        d->dmg_w = mw;
+        d->dmg_h = mh;
+        d->dmg_state = AWL_DMG_RECT;
+    } else if (d->dmg_state == AWL_DMG_RECT) {   /* bbox union */
+        int32_t x2 = d->dmg_x + d->dmg_w;
+        int32_t y2 = d->dmg_y + d->dmg_h;
+        if (mx < d->dmg_x) d->dmg_x = mx;
+        if (my < d->dmg_y) d->dmg_y = my;
+        if (mx + mw > x2) x2 = mx + mw;
+        if (my + mh > y2) y2 = my + mh;
+        d->dmg_w = x2 - d->dmg_x;
+        d->dmg_h = y2 - d->dmg_y;
     }   /* FULL stays full (rect damage subsumed) */
     s->pending_damage_empty = 1;
 }
@@ -873,6 +942,7 @@ static void surface_frame(struct wl_client* client, struct wl_resource* res,
 static void surface_commit(struct wl_client* client, struct wl_resource* res) {
     struct awl_surface* s = wl_resource_get_user_data(res);
     if (!s) return;
+    awl_stats_add(AWL_ST_COMMIT, 1);
 
     /* xdg role state machine check: only a commit that attached a buffer
      * requires a prior ack (an empty commit is legal, clients use it to
@@ -941,13 +1011,29 @@ static void surface_commit(struct wl_client* client, struct wl_resource* res) {
         release_res = s->pend_release_res;
         s->pend_release_res = NULL;
     }
+    /* The buffer state is applied FIRST: it records the newly attached
+     * buffer as the surface's current one, and the damage of this commit
+     * belongs to THAT buffer (per-buffer damage state). Merging before the
+     * attach would attribute the damage to the PREVIOUS buffer. */
+    if (attached) {
+        struct wl_resource* prev = s->shm_res;
+        int same = (prev && prev == s->current_buffer_res);
+        if (s->current_buffer_res && wl_shm_buffer_get(s->current_buffer_res)) {
+            awl_stats_add(same ? AWL_ST_ATTACH_SAMEBUF : AWL_ST_ATTACH_NEWBUF, 1);
+            awl_stats_add(AWL_ST_COMMIT_ATTACH, 1);
+        }
+        awl_surface_apply_buffer(s, s->current_buffer_res, acquire_fd, release_res);
+    }
     /* damage applies on EVERY commit (not just attach-commits): damage+commit
      * without re-attach is the standard in-place redraw pattern */
     awl_damage_merge_pending(s, attached);
-    if (attached)
-        awl_surface_apply_buffer(s, s->current_buffer_res, acquire_fd, release_res);
-    else if (s->cd_state != AWL_DMG_NONE)
-        awl_surface_shm_damaged_locked(s);   /* in-place redraw of a shm source: re-upload the rect */
+    if (!attached) {
+        awl_stats_add(AWL_ST_COMMIT_INPLACE, 1);
+        /* An in-place redraw (damage+commit without an attach): the damage
+         * belongs to the surface's canvas. */
+        if (s->dmg.dmg_state != AWL_DMG_NONE)
+            awl_surface_shm_damaged_locked(s);   /* in-place redraw of a shm source: re-upload the rect */
+    }
     /* Extract the first-map window size inside the lock: window_created
      * below is a callback outside the lock, during which shm_buffer_gone
      * may strip current to NULL (dangling dereference) */
@@ -1202,15 +1288,44 @@ int awl_surface_shm_begin(uint64_t id, uint64_t have_serial, awl_shm_frame_t* f)
     f->stride = (uint32_t)wl_shm_buffer_get_stride(shm);
     f->format = shm_fourcc(wl_shm_buffer_get_format(shm));
     f->pixels = wl_shm_buffer_get_data(shm);
-    f->dmg_full = s->cd_state == AWL_DMG_FULL;
-    if (s->cd_state == AWL_DMG_RECT) {
-        f->dmg_x = s->cur_damage_x; f->dmg_y = s->cur_damage_y;
-        f->dmg_w = s->cur_damage_w; f->dmg_h = s->cur_damage_h;
+    /* The damage belongs to the surface's canvas. */
+    struct awl_dmg_state* d = &s->dmg;
+    if (!d || d->fresh || d->dmg_state == AWL_DMG_FULL) {
+        /* Never uploaded, or the client gave no information: the whole
+         * buffer (the backend creates the texture anyway on a fresh
+         * buffer). */
+        f->dmg_full = 1;
+        f->dmg_x = f->dmg_y = f->dmg_w = f->dmg_h = 0;
+    } else if (d->dmg_state == AWL_DMG_RECT) {
+        f->dmg_full = 0;
+        f->dmg_x = d->dmg_x; f->dmg_y = d->dmg_y;
+        f->dmg_w = d->dmg_w; f->dmg_h = d->dmg_h;
     } else {
+        /* AWL_DMG_NONE: nothing changed in this buffer since its upload —
+         * the caller keeps the texture as it is. */
+        f->dmg_full = 0;
         f->dmg_x = f->dmg_y = f->dmg_w = f->dmg_h = 0;
     }
     f->serial = s->shm_serial;
     f->priv = s;
+    awl_stats_add(AWL_ST_BUF_W, f->width);
+    awl_stats_add(AWL_ST_BUF_H, f->height);
+    {
+        /* The relationship between the buffer's pixel grid and the surface's
+         * logical size is what the damage coordinates are expressed in:
+         * wl_surface.damage is in SURFACE coordinates, damage_buffer in
+         * BUFFER coordinates. A client that uses damage (not damage_buffer)
+         * with a buffer larger than the logical size has its damage scaled
+         * by buffer/logical — the upload rect must be scaled the same way
+         * or it lands in the wrong place (the "half-stuck window"). */
+        float lw = 0, lh = 0;
+        awl_surface_logical_size(s, &lw, &lh);
+        awl_stats_add(AWL_ST_SURF_W, (uint64_t)(lw > 0 ? lw : 0));
+        awl_stats_add(AWL_ST_SURF_H, (uint64_t)(lh > 0 ? lh : 0));
+        if (lw > 0.5f && f->width > (uint32_t)(lw * 1.5f))
+            awl_stats_add(AWL_ST_SCALE_MISMATCH, 1);
+        if (s->vp_dst_w > 0) awl_stats_add(AWL_ST_VP_DST, 1);
+    }
     return 1;   /* rwl.rd + ev_lock held until end */
 }
 
@@ -1220,7 +1335,15 @@ void awl_surface_shm_end(awl_shm_frame_t* f, int consumed) {
         s->current_buffer_res ? wl_shm_buffer_get(s->current_buffer_res) : NULL;
     if (shm) wl_shm_buffer_end_access(shm);   /* unchanged since begin: both locks held */
     if (consumed) {
-        s->cd_state = AWL_DMG_NONE;   /* the consumer holds the pixels now */
+        /* The consumer holds the pixels of THIS buffer now: that buffer's
+         * damage state is retired (the other buffers of the surface keep
+         * theirs). */
+        struct awl_dmg_state* d = &s->dmg;
+        if (d) {
+            d->dmg_state = AWL_DMG_NONE;
+            d->fresh = 0;
+            d->serial = f->serial;
+        }
         shm_release_locked(s);        /* wl_buffer.release: done reading */
     }
     pthread_mutex_unlock(&s->ev_lock);

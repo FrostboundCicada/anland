@@ -10,10 +10,20 @@
  * unchanged.
  *
  * Binds wl_compositor / wl_shm / xdg_wm_base and runs an animated ARGB8888
- * window (moving color bands + a blinking liveness block), honoring xdg
- * configure/close; two buffers from one memfd pool, redraw driven by
- * wl_surface.frame callbacks. Exit path check: xdg_toplevel.close must end
- * the process cleanly.
+ * window, honoring xdg configure/close; buffers from one memfd pool, redraw
+ * driven by wl_surface.frame callbacks. Exit path check: xdg_toplevel.close
+ * must end the process cleanly.
+ *
+ * Modes (argv[1]) — the traffic patterns a real client produces:
+ *   full     damage the whole buffer every frame
+ *   partial  damage a moving band, the buffer drawn in full
+ *   idle     map once, then never redraw (measures the idle pipeline)
+ *   canvas   THE PERSISTENT-CANVAS PATTERN of every browser:
+ *            the client keeps a canvas with the full surface content, the
+ *            buffer holds only the changed region (the rest is stale), and
+ *            the damage is reported in SURFACE coordinates (wl_surface.damage)
+ *            while the buffer is twice the logical size (set_buffer_scale(2))
+ *            — the shape a scale-aware client at zoom>100% produces.
  */
 #define _GNU_SOURCE   /* memfd_create: __USE_GNU (bionic and glibc alike) */
 #include <errno.h>
@@ -47,6 +57,13 @@ static void awl_logline(const char* fmt, ...) {
 
 #define TEST_W 800
 #define TEST_H 600
+/* the canvas mode: the buffer is twice the logical size (set_buffer_scale) */
+#define CANVAS_SCALE 2
+#define CANVAS_W (TEST_W * CANVAS_SCALE)
+#define CANVAS_H (TEST_H * CANVAS_SCALE)
+
+enum run_mode { MODE_FULL = 0, MODE_PARTIAL, MODE_IDLE, MODE_CANVAS };
+static enum run_mode g_mode = MODE_FULL;
 
 static struct wl_display* g_disp;
 static struct wl_compositor* g_comp;
@@ -59,10 +76,14 @@ static int g_configured;            /* first configure seen → buffer commit ma
 static int g_done;                  /* close requested / display gone */
 static uint64_t g_frames;
 
-static void* g_map;                 /* pool mapping: 2 buffers */
+static void* g_map;                 /* pool mapping: the buffers */
 static struct wl_buffer* g_bufs[2];
 static int g_cur;                   /* buffer being painted next */
 static uint32_t g_paint_ms;
+
+/* The canvas: the client's own copy of the full surface content (the
+ * persistent canvas every browser keeps). */
+static uint32_t* g_canvas;
 
 
 static void frame_done(void* data, struct wl_callback* cb, uint32_t ms);
@@ -79,12 +100,121 @@ static void paint(uint32_t* px, int w, int h) {
             px[y * w + x] = c;
 }
 
+/* Partial-damage mode: the whole buffer is filled with a per-buffer
+ * gradient (so a stale region is visible), then a horizontal band is
+ * overwritten with the moving marker. */
+static void paint_partial(uint32_t* px, int w, int h, int buf_index) {
+    for (int y = 0; y < h; y++) {
+        uint32_t row = 0xff000000u | (((uint32_t)(y * 8) & 0xff) << 16) |
+                       ((uint32_t)(buf_index * 0x40) << 8);
+        for (int x = 0; x < w; x++)
+            px[y * w + x] = row;
+    }
+    int band_h = 40;
+    int band_y = (int)((g_paint_ms * 7) % (uint32_t)h);
+    if (band_y + band_h > h) band_y = h - band_h;
+    for (int y = band_y; y < band_y + band_h; y++)
+        for (int x = 0; x < w; x++)
+            px[y * w + x] = 0xff00ffffu;
+}
+
+/* THE CANVAS PATTERN (browser-like):
+ *   the canvas holds the full surface content; the client copies only the
+ *   changed band into the buffer it attaches (the rest of that buffer is
+ *   stale) and reports the damage in SURFACE coordinates.
+ *   The compositor is expected to keep its own canvas: the pixels outside
+ *   the damage must come from ITS copy, not from the attached buffer. */
+static void paint_canvas(uint32_t* px, int w, int h, int* band_y_out) {
+    if (!g_canvas) {
+        g_canvas = calloc((size_t)w * h, sizeof(uint32_t));
+        if (!g_canvas) return;
+    }
+    /* the canvas scrolls: every row shifts down by one pixel every 16 ms */
+    int shift = (int)((g_paint_ms / 16) % (h - 80));
+    for (int y = 0; y < h; y++) {
+        int sy = y + shift;
+        if (sy >= h) sy -= h;
+        uint32_t row = 0xff000000u | (((uint32_t)sy & 0xff) << 16) |
+                       ((((uint32_t)sy >> 8) & 0x3f) << 8);
+        uint32_t* crow = g_canvas + (size_t)y * w;
+        for (int x = 0; x < w; x++)
+            crow[x] = row;
+    }
+    /* a bright band that moves — the region that "scrolled in" */
+    int band_h = 40;
+    int band_y = shift;
+    if (band_y + band_h > h) band_y = h - band_h;
+    for (int y = band_y; y < band_y + band_h; y++) {
+        uint32_t* crow = g_canvas + (size_t)y * w;
+        for (int x = 0; x < w; x++)
+            crow[x] = 0xff00ffffu;
+    }
+    /* the first frame puts the WHOLE canvas into the buffer (the compositor
+     * learns the content); later frames only the band. */
+    if (g_frames == 0) {
+        for (int y = 0; y < h; y++) {
+            uint32_t* crow = g_canvas + (size_t)y * w;
+            uint32_t* prow = px + (size_t)y * w;
+            for (int x = 0; x < w; x++)
+                prow[x] = crow[x];
+        }
+    } else {
+        for (int y = band_y; y < band_y + band_h; y++) {
+            uint32_t* crow = g_canvas + (size_t)y * w;
+            uint32_t* prow = px + (size_t)y * w;
+            for (int x = 0; x < w; x++)
+                prow[x] = crow[x];
+        }
+    }
+    *band_y_out = band_y;
+}
+
+/* The damage rect the client reports. */
+static void damage_rect(int* x, int* y, int* w, int* h) {
+    int band_h = 40;
+    if (g_mode == MODE_CANVAS) {
+        /* SURFACE coordinates (the logical size is TEST_W×TEST_H, the buffer
+         * is CANVAS_W×CANVAS_H): the band is band_h buffer rows = band_h/2
+         * surface rows. */
+        int shift = (int)((g_paint_ms / 16) % (CANVAS_H - 80));
+        int band_y = shift;
+        if (band_y + band_h > CANVAS_H) band_y = CANVAS_H - band_h;
+        *x = 0;
+        *y = band_y / CANVAS_SCALE;
+        *w = TEST_W;
+        *h = band_h / CANVAS_SCALE;
+        return;
+    }
+    int band_y = (int)((g_paint_ms * 7) % (uint32_t)TEST_H);
+    if (band_y + band_h > TEST_H) band_y = TEST_H - band_h;
+    *x = 0; *y = band_y; *w = TEST_W; *h = band_h;
+}
+
 static void redraw(void) {
-    int w = TEST_W, h = TEST_H;
-    uint32_t* px = (uint32_t*)((char*)g_map + (size_t)g_cur * w * h * 4);
-    paint(px, w, h);
+    int w, h;
+    uint32_t* px;
+    if (g_mode == MODE_CANVAS) {
+        w = CANVAS_W; h = CANVAS_H;
+        px = (uint32_t*)((char*)g_map + (size_t)g_cur * w * h * 4);
+        int band_y = 0;
+        paint_canvas(px, w, h, &band_y);
+    } else {
+        w = TEST_W; h = TEST_H;
+        px = (uint32_t*)((char*)g_map + (size_t)g_cur * w * h * 4);
+        if (g_mode == MODE_PARTIAL) paint_partial(px, w, h, g_cur);
+        else paint(px, w, h);
+    }
     wl_surface_attach(g_surf, g_bufs[g_cur], 0, 0);
-    wl_surface_damage_buffer(g_surf, 0, 0, INT32_MAX, INT32_MAX);
+    if (g_mode == MODE_CANVAS) {
+        int dx, dy, dw, dh;
+        damage_rect(&dx, &dy, &dw, &dh);
+        /* SURFACE coordinates — the request a scale-aware client makes */
+        wl_surface_damage(g_surf, dx, dy, dw, dh);
+    } else {
+        int dx, dy, dw, dh;
+        damage_rect(&dx, &dy, &dw, &dh);
+        wl_surface_damage_buffer(g_surf, dx, dy, dw, dh);
+    }
     wl_surface_commit(g_surf);
     g_cur ^= 1;
 }
@@ -99,12 +229,14 @@ static void frame_done(void* data, struct wl_callback* cb, uint32_t ms) {
     wl_callback_destroy(cb);
     g_paint_ms = ms;
     if (g_done) return;
-    struct wl_callback* next = wl_surface_frame(g_surf);
-    wl_callback_add_listener(next, &k_frame_l, NULL);
-    redraw();
-    g_frames++;
-    if (g_frames % 60 == 0)
-        LOG("frame #%llu", (unsigned long long)g_frames);
+    if (g_mode != MODE_IDLE) {
+        struct wl_callback* next = wl_surface_frame(g_surf);
+        wl_callback_add_listener(next, &k_frame_l, NULL);
+        redraw();
+        g_frames++;
+        if (g_frames % 60 == 0)
+            LOG("frame #%llu", (unsigned long long)g_frames);
+    }
     wl_display_flush(g_disp);
 }
 
@@ -116,16 +248,14 @@ static void xdg_configure(void* data, struct xdg_surface* s, uint32_t serial) {
         wl_callback_add_listener(cb, &k_frame_l, NULL);
         redraw();   /* first buffer commit = map (the daemon creates the window here) */
         wl_display_flush(g_disp);
-        LOG("mapped %dx%d (configure serial %u)", TEST_W, TEST_H, serial);
+        LOG("mapped (configure serial %u)", serial);
     }
 }
 
 static void toplevel_configure(void* data, struct xdg_toplevel* t,
                                int32_t w, int32_t h, struct wl_array* states) {
-    /* sizes are daemon-owned (Android window); this test keeps its fixed
-     * buffer — scale_mode letterboxes it */
     if (w || h)
-        LOG("toplevel configure %dx%d (fixed %dx%d buffer)", w, h, TEST_W, TEST_H);
+        LOG("toplevel configure %dx%d", w, h);
 }
 
 static void toplevel_close(void* data, struct xdg_toplevel* t) {
@@ -154,9 +284,15 @@ static void registry_global(void* data, struct wl_registry* r, uint32_t name,
 
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
+    if (argc > 1) {
+        if (strcmp(argv[1], "partial") == 0) g_mode = MODE_PARTIAL;
+        else if (strcmp(argv[1], "idle") == 0) g_mode = MODE_IDLE;
+        else if (strcmp(argv[1], "canvas") == 0) g_mode = MODE_CANVAS;
+        else g_mode = MODE_FULL;
+    }
     const char* env = getenv("WAYLAND_SOCKET");
-    LOG("client pid=%d uid=%d WAYLAND_SOCKET=%s",
-        getpid(), getuid(), env ? env : "(unset, connecting via WAYLAND_DISPLAY)");
+    LOG("client pid=%d uid=%d WAYLAND_SOCKET=%s mode=%d",
+        getpid(), getuid(), env ? env : "(unset, connecting via WAYLAND_DISPLAY)", (int)g_mode);
 
     g_disp = wl_display_connect(NULL);   /* consumes WAYLAND_SOCKET, takes fd ownership */
     if (!g_disp) {
@@ -175,8 +311,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    /* two ARGB8888 buffers from one memfd pool */
-    size_t bufsz = (size_t)TEST_W * TEST_H * 4;
+    /* the buffers: two of them from one memfd pool */
+    int w = (g_mode == MODE_CANVAS) ? CANVAS_W : TEST_W;
+    int h = (g_mode == MODE_CANVAS) ? CANVAS_H : TEST_H;
+    size_t bufsz = (size_t)w * h * 4;
     int fd = memfd_create("awlshm", MFD_CLOEXEC);
     if (fd < 0 || ftruncate(fd, bufsz * 2) != 0) {
         fprintf(stderr, "awlshm: memfd: %s\n", strerror(errno));
@@ -188,14 +326,18 @@ int main(int argc, char** argv) {
         return 1;
     }
     struct wl_shm_pool* pool = wl_shm_create_pool(g_shm, fd, bufsz * 2);
-    g_bufs[0] = wl_shm_pool_create_buffer(pool, 0, TEST_W, TEST_H,
-                                          TEST_W * 4, WL_SHM_FORMAT_ARGB8888);
-    g_bufs[1] = wl_shm_pool_create_buffer(pool, bufsz, TEST_W, TEST_H,
-                                          TEST_W * 4, WL_SHM_FORMAT_ARGB8888);
+    g_bufs[0] = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4, WL_SHM_FORMAT_ARGB8888);
+    g_bufs[1] = wl_shm_pool_create_buffer(pool, bufsz, w, h, w * 4, WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool);   /* buffers hold their own references */
     close(fd);
 
     g_surf = wl_compositor_create_surface(g_comp);
+    if (g_mode == MODE_CANVAS) {
+        /* the buffer is twice the logical size: the client renders
+         * logical×2 into its buffer and reports the damage in logical
+         * (surface) coordinates — the scale-aware client shape. */
+        wl_surface_set_buffer_scale(g_surf, CANVAS_SCALE);
+    }
     static const struct xdg_surface_listener xsurf_l = { xdg_configure };
     static const struct xdg_toplevel_listener tlp_l = { toplevel_configure, toplevel_close };
     g_xsurf = xdg_wm_base_get_xdg_surface(g_wm, g_surf);

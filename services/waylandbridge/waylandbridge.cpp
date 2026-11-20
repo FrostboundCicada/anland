@@ -52,6 +52,7 @@
 #include "awl.h"
 #include "awl_renderer.hpp"
 #include "awl_sc.hpp"
+#include "awl_stats.h"
 
 #include <android/binder_ibinder.h>
 #include <android/binder_parcel.h>
@@ -1116,6 +1117,7 @@ static void cb_pointer_cursor(void* user, uint64_t id, int hidden) {
 }
 
 static void cb_window_dirty(void* user, uint64_t id) {
+    awl_stats_add(AWL_ST_DIRTY, 1);
     /* on detach (incl. pause) there is no backend entry → no-op: send no
      * frame_done; the client naturally parks in eglSwapBuffers waiting —
      * zero-cost keep-alive */
@@ -2127,6 +2129,7 @@ int main(int argc, char** argv) {
     signal(SIGCHLD, SIG_DFL);
 
     LOGI("awl-daemon starting (pid=%d uid=%d)", getpid(), getuid());
+    awl_stats_start();   /* pipeline counters (AWL_STATS=1 in the env) */
 
     cfg_load_sock_cfg();   /* runtime_dir / socket_listen before mkdir/bind (manual-only keys) */
     mkdir(g_sock_dir, 0777);

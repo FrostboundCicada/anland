@@ -3,6 +3,7 @@
 #include "awl.h"               /* awl_shm_frame_t */
 #include "awl_ahb.hpp"
 #include "awl_bufferqueue.h"   /* awl_fence_wait (CPU fallback) */
+#include "awl_stats.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -421,10 +422,22 @@ bool awl_gl_shm_update(awl_gl_shm_tex* t, const struct awl_shm_frame* f) {
         h = y2 - y;
     }
     if (w > 0 && h > 0) {
+        struct timespec u0, u1;
+        clock_gettime(CLOCK_MONOTONIC, &u0);
+        awl_stats_add(AWL_ST_SHM_UPLOADS, 1);
+        awl_stats_add(AWL_ST_SHM_UPLOAD_PX, (uint64_t)w * (uint64_t)h);
+        if (f->dmg_full)
+            awl_stats_add(AWL_ST_SHM_FULL, 1);
+        else
+            awl_stats_add(AWL_ST_SHM_DMG_PX, (uint64_t)w * (uint64_t)h);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)(f->stride / 4));
         glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, fmt, GL_UNSIGNED_BYTE,
                         (const uint8_t*)f->pixels + (size_t)y * f->stride + (size_t)x * 4);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        clock_gettime(CLOCK_MONOTONIC, &u1);
+        awl_stats_add(AWL_ST_UPLOAD_NS,
+                      (uint64_t)((u1.tv_sec - u0.tv_sec) * 1000000000LL +
+                                 (u1.tv_nsec - u0.tv_nsec)));
     }
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {

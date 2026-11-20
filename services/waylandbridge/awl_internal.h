@@ -18,12 +18,34 @@
 #include "awl_bufferqueue.h"
 #include "awl_log.h"   /* AWL_TAG "anland-wl" + LOGI/LOGE/LOGD (see awl_log.h) */
 
-/* Damage state of a surface since a composition backend last uploaded its
- * wl_shm content (awl_surface.cd_state; NONE = calloc default) */
+/* Damage state of ONE client buffer since a composition backend last
+ * uploaded that buffer's wl_shm content (awl_dmg_state.dmg_state; NONE =
+ * calloc default).
+ *
+ * PER BUFFER, NOT PER SURFACE (kwin's BufferImage model): a client that
+ * double-/triple-buffers attaches a DIFFERENT wl_buffer every frame, and
+ * each buffer carries its own content. The damage a client reports belongs
+ * to the buffer it drew into, so the compositor must track "what changed in
+ * THIS buffer" separately for every buffer it has seen. With one damage
+ * state per surface the compositor cannot tell which buffer the client
+ * drew into, so a re-attach of a different buffer forces a full upload of
+ * the surface — 15x the traffic for a scrolling page (measured: 480000 px
+ * uploaded where 32000 px were dirty). */
 enum {
     AWL_DMG_NONE = 0,
     AWL_DMG_RECT = 1,
     AWL_DMG_FULL = 2,
+};
+
+/* The damage state of ONE surface (kwin's SurfaceState::bufferDamage):
+ * what the backend still has to upload into the surface's canvas. One per
+ * surface, not per buffer — the canvas is the compositor's own copy, so the
+ * damage of every commit accumulates into it. */
+struct awl_dmg_state {
+    unsigned dmg_state : 2;         /* AWL_DMG_* */
+    unsigned fresh : 1;             /* the backend never uploaded this surface */
+    int32_t dmg_x, dmg_y, dmg_w, dmg_h;
+    uint64_t serial;                /* the shm serial this state reflects */
 };
 
 #define awl_fourcc(a, b, c, d) \
@@ -269,8 +291,18 @@ struct awl_surface {
      *   FULL    a commit attached a buffer with NO damage — protocol
      *           default: whole surface (client gave no information)
      * Over-copy is always safe, under-copy never. All owned by ev_lock. */
+    /* Pending damage. wl_surface.damage is in SURFACE coordinates and
+     * wl_surface.damage_buffer in BUFFER coordinates — the two differ
+     * whenever the buffer is larger than the surface's logical size (a
+     * scale-aware client at zoom>100% renders logical×Z into the buffer).
+     * pd_surface = 1 → the pending rect is in surface coordinates and has
+     * to be scaled into the buffer's pixel grid before it is uploaded
+     * (kwin's mapToBuffer). */
     int32_t pd_x, pd_y, pd_w, pd_h;
-    int32_t cur_damage_x, cur_damage_y, cur_damage_w, cur_damage_h;
+    bool pd_surface;                  /* the pending rect is in surface coords */
+    /* The surface's damage state: what the backend still has to upload
+     * into the surface's canvas (see struct awl_dmg_state above). */
+    struct awl_dmg_state dmg;
 
     /* ---- flags: two bit-field words, split BY WRITER THREAD ----
      * A bit-field write is a word-wide read-modify-write, so all writers of
@@ -302,7 +334,6 @@ struct awl_surface {
                                           * attach(NULL) / a dmabuf attach) */
     unsigned shm_release_pending : 1;   /* wl_buffer.release for shm_res not sent yet */
     unsigned q_last_dmabuf : 1;         /* the newest push was a dmabuf frame */
-    unsigned cd_state : 2;              /* AWL_DMG_* (NONE = 0, calloc-init) */
     /* plain ints (real values / addressable — never bit-fields). These also
      * physically separate the two flag words — do not move them. */
     int pend_acquire_fd;                /* -1 = none */
@@ -541,6 +572,10 @@ void awl_surface_apply_regions_locked(struct awl_surface* s);
  * has_attach = this commit presented a new buffer — attach without damage
  * then means FULL; an empty commit (neither) is a no-op. */
 void awl_damage_merge_pending(struct awl_surface* s, int has_attach);
+/* Scale a surface-coordinate damage rect into the buffer's pixel grid
+ * (kwin's SurfaceInterfacePrivate::mapToBuffer). Caller holds ev_lock. */
+void awl_damage_to_buffer(struct awl_surface* s, int32_t* x, int32_t* y,
+                           int32_t* w, int32_t* h);
 
 /* Shared by dmabuf/shm: on buffer destroy, unlink it from pending/current/
  * latched of every surface (rwl.rd + ev_lock inside; dispatch thread) */
