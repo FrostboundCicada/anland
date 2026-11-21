@@ -72,7 +72,10 @@ PULSE_START_RETRIES=2
 bring_to_foreground() {
   local sdk
   sdk=$(getprop ro.build.version.sdk 2>/dev/null)
-  [ "${sdk:-0}" -ge 37 ] || return 0
+  # Background Audio Hardening ships in Android 16 (SDK 36): createTrack is
+  # rejected for any process without a visible Activity or a non-SHORT_SERVICE
+  # foreground service.  Verified on Android 16/SDK 36 (OpenSL ES error 9).
+  [ "${sdk:-0}" -ge 36 ] || return 0
   # MainActivity exists in every com.anlandnext build and has a launcher
   # intent; EXCLUDE_FROM_RECENTS keeps the user's recent-tasks list clean.
   am start -n com.anlandnext/.MainActivity \

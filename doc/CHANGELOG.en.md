@@ -13,6 +13,21 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
+## 6.2.10 - 2026-11-21
+
+### Fixed
+
+**PulseAudio fails to initialize OpenSL ES on Android 16** (SL_RESULT_RESOURCE_ERROR).
+Background audio hardening starts at Android 16 (SDK 36), not Android 17: AudioTrack /
+AAudioStream creation is rejected from any process without a visible Activity or a
+non-SHORT_SERVICE foreground service. com.anlandnext has neither, so every boot
+PulseAudio logged module-sles-sink.c: Failed to initialize OpenSL ES: error 9 and
+fell back to auto_null, leaving container audio silent through the PipeWire
+pulse-tunnel. service.sh now brings the APK to foreground before launching
+PulseAudio on SDK 36 and above; verified on Android 16/SDK 36 where the Android
+sink is created even after the Activity is force-stopped. The v6.2.9 fix gated the
+foreground call to SDK 37+ and therefore missed Android 16 devices.
+
 ## 6.2.9 - 2026-11-21
 
 ### Fixed
@@ -28,6 +43,9 @@ foreground before launching PulseAudio. Once the initial AudioTrack exists the
 Activity can go to home and subsequent playbacks are unaffected — the hardening
 gates only createTrack, not normal play. Gated to SDK 37+ so pre-Android-17
 devices see no behaviour change.
+
+> **Note:** the SDK gate was too narrow — Android 16 (SDK 36) is affected as well.
+> See v6.2.10.
 
 ## 6.2.8 - 2026-11-20
 
