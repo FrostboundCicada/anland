@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <pulse/rtclock.h>
@@ -32,6 +33,7 @@
 
 #include <pulsecore/core-util.h>
 #include <pulsecore/log.h>
+#include <pulsecore/memblock.h>
 #include <pulsecore/modargs.h>
 #include <pulsecore/module.h>
 #include <pulsecore/rtpoll.h>
@@ -99,15 +101,29 @@ static const char *const valid_modargs[] = {
 
 static void process_render(void *userdata) {
     struct userdata *u = userdata;
+    pa_memchunk chunk;
+    pa_memblock *mb;
     pa_assert(u);
 
     (*u->RecordItf)->SetRecordState(u->RecordItf, SL_RECORDSTATE_RECORDING);
     if (!PA_SOURCE_IS_LINKED(u->source->thread_info.state))
         return;
 
-    u->memchunk.length = u->nbytes;
-    (*u->BufferQueueItf)->Enqueue(u->BufferQueueItf, u->buf, u->memchunk.length);
-    pa_source_post(u->source, &u->memchunk);
+    /* Copy the captured block out of u->buf before re-arming the queue:
+     * OpenSL overwrites u->buf as soon as it is enqueued again, so posting a
+     * memblock that wraps it directly hands PulseAudio data that is being
+     * rewritten underneath it. */
+    mb = pa_memblock_new(u->source->core->mempool, u->nbytes);
+    memcpy(pa_memblock_acquire(mb), u->buf, u->nbytes);
+    pa_memblock_release(mb);
+
+    (*u->BufferQueueItf)->Enqueue(u->BufferQueueItf, u->buf, u->nbytes);
+
+    chunk.memblock = mb;
+    chunk.offset = 0;
+    chunk.length = u->nbytes;
+    pa_source_post(u->source, &chunk);
+    pa_memblock_unref(mb);
 }
 
 static int source_process_msg(pa_msgobject *o, int code, void *data, int64_t offset, pa_memchunk *memchunk) {
@@ -284,8 +300,13 @@ static int state_func(pa_source *s, pa_source_state_t state, pa_suspend_cause_t 
 
     if (PA_SOURCE_IS_OPENED(s->state) && (state == PA_SOURCE_SUSPENDED || state == PA_SOURCE_UNLINKED))
         (*u->RecordItf)->SetRecordState(u->RecordItf, SL_RECORDSTATE_STOPPED);
-    else if ((s->state == PA_SOURCE_SUSPENDED || s->state == PA_SOURCE_INIT) && PA_SOURCE_IS_OPENED(state))
+    else if ((s->state == PA_SOURCE_SUSPENDED || s->state == PA_SOURCE_INIT) && PA_SOURCE_IS_OPENED(state)) {
+        /* Prime the queue BEFORE starting: the recorder only delivers a
+         * buffer (and thus calls sles_callback) once one is enqueued. */
+        if (u->BufferQueueItf && u->buf)
+            (*u->BufferQueueItf)->Enqueue(u->BufferQueueItf, u->buf, u->nbytes);
         (*u->RecordItf)->SetRecordState(u->RecordItf, SL_RECORDSTATE_RECORDING);
+    }
     return 0;
 }
 

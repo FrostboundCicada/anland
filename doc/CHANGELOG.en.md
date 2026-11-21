@@ -28,6 +28,15 @@ the default source, and service.sh grants RECORD_AUDIO to com.anlandnext
 before PulseAudio starts — the recorder runs under the app uid, and Android
 refuses AudioRecord without the permission.
 
+The vendored module needed two fixes before it delivered audio. It only ever
+enqueued a capture buffer from its own completion callback, but OpenSL ES fires
+that callback only after a buffer has already been enqueued, so the record queue
+stayed empty and every block PulseAudio received was the zeroed allocation. The
+queue is now primed when the source opens. The module also posted a memblock
+that wrapped the live recorder buffer and then re-armed the queue, letting the
+recorder rewrite the block while PulseAudio was still reading it; each captured
+block is copied out first.
+
 ### Fixed
 
 **PulseAudio fails to initialize OpenSL ES on Android 16** (SL_RESULT_RESOURCE_ERROR).
