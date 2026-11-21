@@ -23,9 +23,11 @@ rule only granted the droidspacesd domain connectto: the server side
 (awl_daemon) still lacked accept/read/write/getopt/setopt on the accepted
 socket, so the connection was established and then silently dropped —
 libpipewire-module-pulse-tunnel reported "can't connect: Host is down" and the
-container fell back to auto_null instead of the Android sink. The server-side
-permissions are granted now, and the host PulseAudio is started with
-auth-group=any so anonymous clients from the container are accepted.
+container fell back to auto_null instead of the Android sink. Three pieces
+were missing: the server-side socket permissions, the search permission on
+the runtime directory (shell_data_file) that has to be traversed before the
+socket inode can be opened, and auth-group=any on the host PulseAudio so
+anonymous clients from the container are accepted.
 
 ### Added
 

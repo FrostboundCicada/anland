@@ -89,14 +89,22 @@ type_transition awl_daemon shell_data_file sock_file awl_runtime_sock
 allow awl_runtime_sock labeledfs filesystem associate
 allow awl_daemon awl_runtime_sock sock_file { create unlink setattr read write getattr open }
 allow droidspacesd awl_runtime_sock sock_file { open read write getattr setattr }
+# The runtime directory itself (shell_data_file on the host, bind-mounted to
+# /run/anland in the container) has to be searchable before the socket inode
+# can be opened.  Without the search permission the container client fails
+# silently: connect() succeeds but the PulseAudio handshake never happens,
+# so the tunnel reports "can't connect: Host is down".
+allow droidspacesd shell_data_file dir { search getattr read open }
 allow droidspacesd awl_daemon unix_stream_socket connectto
-# The server side needs the full socket permission set: the PulseAudio
-# server runs in awl_daemon and must accept() the container connection and
-# then read/write/getopt/setopt on it.  Without these the container client
-# connects but the handshake never completes (PulseAudio reports
-# PA_ERR_HOSTDOWN and libpipewire-module-pulse-tunnel gives up with
-# "can't connect: Host is down").
-allow awl_daemon droidspacesd unix_stream_socket { read write getopt setopt accept }
+# The server side of the runtime socket: awl_daemon has to accept() the
+# container connection and then read/write/getopt/setopt on that socket.
+# unix_stream_socket is a process-private object, so the permission is
+# checked against the domain that owns the socket - not against the peer.
+# Without this the container connects but the handshake never completes:
+# PulseAudio reports PA_ERR_HOSTDOWN and libpipewire-module-pulse-tunnel
+# gives up with "can't connect: Host is down".
+allow awl_daemon self unix_stream_socket { read write getopt setopt accept }
+allow awl_daemon unix_stream_socket { read write getopt setopt accept }
 # service.sh relabels its pactl health probe as awl_daemon_exec; it therefore
 # connects to the PulseAudio server from the same domain.
 allow awl_daemon awl_daemon unix_stream_socket connectto
