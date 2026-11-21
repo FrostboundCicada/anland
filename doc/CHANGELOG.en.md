@@ -15,6 +15,18 @@ content is archived below.
 
 ## 6.2.11 - 2026-11-21
 
+### Fixed
+
+**Container audio handshake fails with PA_ERR_HOSTDOWN.** The container
+reaches the host PulseAudio over the anland runtime socket, but the SELinux
+rule only granted the droidspacesd domain connectto: the server side
+(awl_daemon) still lacked accept/read/write/getopt/setopt on the accepted
+socket, so the connection was established and then silently dropped —
+libpipewire-module-pulse-tunnel reported "can't connect: Host is down" and the
+container fell back to auto_null instead of the Android sink. The server-side
+permissions are granted now, and the host PulseAudio is started with
+auth-group=any so anonymous clients from the container are accepted.
+
 ### Added
 
 **Microphone capture for the container.** The PulseAudio build shipped playback

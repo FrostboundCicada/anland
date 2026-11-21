@@ -183,7 +183,7 @@ PULSE_STATE_PATH='$PH/state' PULSE_CONFIG_PATH='$PAR/etc/pulse' \
 LD_LIBRARY_PATH='$PAR/lib:$PAR/lib/pulseaudio:$PAR/lib/pulseaudio/modules'; \
 exec '$PAR/bin/pulseaudio' --daemonize=no --exit-idle-time=-1 --disallow-exit \
 --log-target=stderr -n -F '$PAR/etc/pulse/default.pa' \
--L 'module-native-protocol-unix auth-anonymous=1 socket=$RT/pulse.sock'" \
+-L 'module-native-protocol-unix auth-anonymous=1 auth-group=any socket=$RT/pulse.sock'" \
     >> "$LOG" 2>&1 &
 }
 
