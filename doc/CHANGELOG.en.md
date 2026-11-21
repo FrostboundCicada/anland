@@ -13,28 +13,7 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
-## 6.2.11 - 2026-11-21
-
-### Fixed
-
-**PulseAudio falls back to a null sink on a cold boot.** The foreground
-call ran once and then slept three seconds; on a cold boot am start is still
-refused while the device is locked, so PulseAudio hit the same createTrack
-rejection and ended up on auto_null. The APK is now brought up repeatedly and
-the script waits for the Activity to actually reach RESUMED.
-
-**Container audio handshake fails with PA_ERR_HOSTDOWN.** The container
-reaches the host PulseAudio over the anland runtime socket, but the SELinux
-rule only granted the droidspacesd domain connectto: the server side
-(awl_daemon) still lacked accept/read/write/getopt/setopt on the accepted
-socket, so the connection was established and then silently dropped —
-libpipewire-module-pulse-tunnel reported "can't connect: Host is down" and the
-container fell back to auto_null instead of the Android sink. Three pieces
-were missing: the server-side socket permissions, the search permission on
-the runtime directory (shell_data_file and the underlying
-system_data_file) that has to be traversed before the socket inode can be
-opened, and auth-group=any on the host PulseAudio so anonymous clients from
-the container are accepted.
+## 6.2.10 - 2026-11-21
 
 ### Added
 
@@ -62,15 +41,39 @@ block is copied out first.
 
 **PulseAudio fails to initialize OpenSL ES on Android 16** (SL_RESULT_RESOURCE_ERROR).
 Background audio hardening starts at Android 16 (SDK 36), not Android 17: AudioTrack /
-AAudioStream creation is rejected from any process without a visible Activity or a
+AAudioStream creation is rejected for any process without a visible Activity or a
 non-SHORT_SERVICE foreground service. com.anlandnext has neither, so every boot
 PulseAudio logged module-sles-sink.c: Failed to initialize OpenSL ES: error 9 and
 fell back to auto_null, leaving container audio silent through the PipeWire
-pulse-tunnel. service.sh now brings the APK to foreground before launching
-PulseAudio on SDK 36 and above; verified on Android 16/SDK 36 where the Android
-sink is created even after the Activity is force-stopped. The v6.2.9 fix gated the
-foreground call to SDK 37+ and therefore missed Android 16 devices.
+pulse-tunnel. service.sh now brings the APK to foreground on SDK 36 and above;
+verified on Android 16/SDK 36 where the Android sink is created even after the
+Activity is force-stopped. The v6.2.9 fix gated the foreground call to SDK 37+ and
+therefore missed Android 16 devices.
 
+**PulseAudio falls back to a null sink on a cold boot.** The foreground
+call ran once and then slept three seconds; on a cold boot am start is still
+refused while the device is locked, so PulseAudio hit the same createTrack
+rejection and ended up on auto_null. The APK is now brought up repeatedly and
+the script waits for the Activity to actually reach RESUMED.
+
+**Container audio handshake fails with PA_ERR_HOSTDOWN.** The container
+reaches the host PulseAudio over the anland runtime socket, but the SELinux
+rule only granted the droidspacesd domain connectto: the server side
+(awl_daemon) still lacked accept/read/write/getopt/setopt on the accepted
+socket, so the connection was established and then silently dropped —
+libpipewire-module-pulse-tunnel reported "can't connect: Host is down" and the
+container fell back to auto_null instead of the Android sink. Three pieces
+were missing: the server-side socket permissions, the search permission on the
+runtime directory (shell_data_file and the underlying system_data_file) that
+has to be traversed before the socket inode can be opened, and auth-group=any on
+the host PulseAudio so anonymous clients from the container are accepted.
+
+**Container clients cannot authenticate against the host PulseAudio.** The
+container runs under a different uid and cannot read the PulseAudio home
+directory, so it had no way to authenticate: the anonymous handshake was
+rejected and the tunnel gave up with "can't connect: Host is down". The cookie
+is now published in the runtime directory, which is bind-mounted into the
+container as /run/anland.
 ## 6.2.9 - 2026-11-21
 
 ### Fixed
