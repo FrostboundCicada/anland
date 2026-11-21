@@ -90,6 +90,13 @@ allow awl_runtime_sock labeledfs filesystem associate
 allow awl_daemon awl_runtime_sock sock_file { create unlink setattr read write getattr open }
 allow droidspacesd awl_runtime_sock sock_file { open read write getattr setattr }
 allow droidspacesd awl_daemon unix_stream_socket connectto
+# The server side needs the full socket permission set: the PulseAudio
+# server runs in awl_daemon and must accept() the container connection and
+# then read/write/getopt/setopt on it.  Without these the container client
+# connects but the handshake never completes (PulseAudio reports
+# PA_ERR_HOSTDOWN and libpipewire-module-pulse-tunnel gives up with
+# "can't connect: Host is down").
+allow awl_daemon droidspacesd unix_stream_socket { read write getopt setopt accept }
 # service.sh relabels its pactl health probe as awl_daemon_exec; it therefore
 # connects to the PulseAudio server from the same domain.
 allow awl_daemon awl_daemon unix_stream_socket connectto
