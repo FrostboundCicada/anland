@@ -120,7 +120,7 @@ static void process_render(void *userdata) {
     (*u->BufferQueueItf)->Enqueue(u->BufferQueueItf, u->buf, u->nbytes);
 
     chunk.memblock = mb;
-    chunk.offset = 0;
+    chunk.index = 0;
     chunk.length = u->nbytes;
     pa_source_post(u->source, &chunk);
     pa_memblock_unref(mb);
