@@ -18,6 +18,14 @@ load-module module-stream-restore restore_device=false
 load-module module-sles-sink sink_name=android sink_properties=device.description=Android
 #load-module module-aaudio-sink sink_name=android sink_properties=device.description=Android
 set-default-sink android
+
+# Microphone: the same OpenSL ES engine in record mode.  It needs the
+# RECORD_AUDIO permission for the com.anlandnext uid, which service.sh
+# grants before PulseAudio starts; without it the recorder is refused with
+# SL_RESULT_CONTENT_UNSUPPORTED.  Set as the default source so container
+# apps (PipeWire pulse-tunnel, browsers, meeting clients) can capture.
+load-module module-sles-source source_name=android_microphone source_properties=device.description=Android
+set-default-source android_microphone
 .fail
 
 load-module module-always-sink

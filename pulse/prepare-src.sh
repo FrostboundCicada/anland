@@ -35,10 +35,10 @@ grep -rl '@TERMUX_PREFIX@' src | xargs sed -i "s|@TERMUX_PREFIX@|$RT|g"
 mkdir -p src/modules/sles src/modules/aaudio
 cp "$TERMUX/module-sles-sink.c" src/modules/sles/
 cp "$TERMUX/module-aaudio-sink.c" src/modules/aaudio/
+cp "$TERMUX/module-sles-source.c" src/modules/sles/
 
-# anland: playback only — the Termux meson patch also lists a sles SOURCE
-# (microphone), which we do not ship
-sed -i '/module-sles-source/d' src/modules/meson.build
+# anland ships the sles SOURCE module too (microphone): the Termux meson
+# patch already lists it, so nothing has to be removed here.
 
 # bionic has no libintl. Termux drops the intl dependency but leaves
 # ENABLE_NLS on (their sysroot ships gettext); here NLS follows dgettext

@@ -13,7 +13,20 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
-## 6.2.10 - 2026-11-21
+## 6.2.11 - 2026-11-21
+
+### Added
+
+**Microphone capture for the container.** The PulseAudio build shipped playback
+only: prepare-src.sh removed the Termux `module-sles-source` entry from the
+meson module list, so the host exposed an `android` sink but no capture source.
+Container apps therefore saw an empty source list through the PipeWire
+pulse-tunnel and could not record anything. The Termux sles source module is
+now vendored (pulse/termux/module-sles-source.c) and built into
+module-sles-source.so; default.pa loads it as `android_microphone` and makes it
+the default source, and service.sh grants RECORD_AUDIO to com.anlandnext
+before PulseAudio starts — the recorder runs under the app uid, and Android
+refuses AudioRecord without the permission.
 
 ### Fixed
 

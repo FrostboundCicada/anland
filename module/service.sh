@@ -205,6 +205,12 @@ start_pulse() {
     echo "anland: pulse skipped (com.anlandnext not installed)" >> "$LOG"
     return
   fi
+  # Microphone: the sles SOURCE module records through this uid, so the app
+  # needs RECORD_AUDIO.  pm grant is idempotent; a missing permission would
+  # make AudioRecord fail with SL_RESULT_CONTENT_UNSUPPORTED and the
+  # container would see no capture source at all.
+  pm grant com.anlandnext android.permission.RECORD_AUDIO 2>/dev/null || true
+
   # a previous instance (repair path, or an app reinstall that changed the
   # uid) still holds the old tree and socket — replace it whole
   stop_pulse
