@@ -25,6 +25,86 @@ Release 页面上的每个条目都按发布先后重命名为新式 tag（tag �
 | `6.2-ds7` | `v6.2.7` | 2026-11-20 |
 | `6.2-ds8` | （并入 `v6.2.8`，原 Release 已删除） | 2026-11-20 |
 
+## v6.2.10
+
+### 新增
+
+**容器麦克风采集。** 之前的 PulseAudio 构建只带播放：prepare-src.sh 把 Termux 的
+`module-sles-source` 从 meson 模块列表里删掉了，宿主因此只有 `android` sink、
+没有采集 source。容器应用经 PipeWire pulse-tunnel 看到的 source 列表是空的，
+什么也录不到。现在 Termux 的 sles source 模块已内置
+（`pulse/termux/module-sles-source.c`）并编进 `module-sles-source.so`；
+`default.pa` 以 `android_microphone` 加载它并设为默认 source，service.sh 在
+PulseAudio 启动前把 RECORD_AUDIO 授予 com.anlandnext —— 录音器跑在应用 uid 下，
+缺这个权限 Android 会直接拒绝 AudioRecord。
+
+这个内置模块要修两处才能出声音。它只在自身的完成回调里投递采集缓冲，而 OpenSL ES
+只在已有缓冲入队后才会触发该回调，于是录音队列始终是空的、PulseAudio 收到的每个
+数据块都是清零后的分配区；现在 source 打开时就预热队列。模块还把包住实时录音缓冲的
+memblock 投递出去后立刻重新入队，录音器会在 PulseAudio 还在读的时候改写该块；现在
+每个采集块先拷贝出来。录音器也改用通用（MIC）预设而非 VOICE_RECOGNITION：后者在
+有客户端持有 DIRECT_RECORD 轨道时会被 Android 静音，容器麦克风因此是哑的。
+
+### 修复
+
+**屏幕上没有 anland 窗口时容器麦克风是哑的。** RECORD_AUDIO 以「仅前台」的 app-op
+模式授予，一旦应用 uid 不再是前台，AudioPolicyManager 会立刻重新施加录音静音：
+日志里 `startInput on silenced input ... Unsilencing` 之后同一毫秒就是
+`setRecordSilenced(general), silenced 1`，sles source 于是交给每个 libpulse 客户端
+一段等长的全零流 —— parecord 写出的文件长度正常，内容却是纯静音。录音因此只在
+「anland 的 Activity 可见、且屏幕已解锁亮屏」时才有效，而容器桌面无法保证这一点。
+现在 APK 运行 AudioBridgeService（由 service.sh 在 PulseAudio 之前拉起的前台服务），
+用极低重要性通知把应用 uid 保持在前台，无需任何窗口。在 2410CRP4CG / Android 16 上
+实测：桌面在顶层且息屏时，3 秒采集有 95.6% 非零采样（峰值 562），不再是全零文件。
+targetSdk 仍为 29，因此 API 34 的 FOREGROUND_SERVICE_MICROPHONE 要求与 while-in-use
+启动限制都不适用；旧版 APK 没有该服务时这个调用是空操作，行为退回基于 Activity 的
+方式。
+
+**PulseAudio 在 Android 16 上初始化 OpenSL ES 失败**（SL_RESULT_RESOURCE_ERROR）。
+后台音频加固从 Android 16（SDK 36）起生效，不是 Android 17：任何既无可见 Activity、
+又无非 SHORT_SERVICE 前台服务的进程，AudioTrack / AAudioStream 创建都会被拒绝。
+com.anlandnext 两者都没有，因此每次开机 PulseAudio 都记录
+`module-sles-sink.c: Failed to initialize OpenSL ES: error 9` 并退回 auto_null，
+容器音频经 PipeWire pulse-tunnel 一直是静音。service.sh 现在在 SDK 36 及以上把 APK
+拉到前台；在 Android 16/SDK 36 上验证过，即使 Activity 被强制停止，android sink
+仍能建立。v6.2.9 的修复把前台调用限制在 SDK 37+，因此漏掉了 Android 16 设备。
+
+**冷启动时 PulseAudio 退回空 sink。** 前台调用只跑一次然后睡三秒；冷启动时设备
+仍处于锁定，am start 依然被拒，PulseAudio 撞上同一个 createTrack 拒绝并落到
+auto_null。现在会反复拉起 APK，并等 Activity 真正进入 RESUMED。前台调用也移进了
+启动重试循环，因为冷启动时第一次 am start 会在 launcher 尚未就绪时被拒 —— 没有它
+整个开机过程都停在 auto_null。本条目只涉及播放路径：录音被静音是另一套机制
+（「仅前台」的 RECORD_AUDIO app-op），由 AudioBridgeService 单独修复。
+
+**容器音频握手以 PA_ERR_HOSTDOWN 失败。** 容器通过 anland 运行态 socket 连到宿主
+PulseAudio，但 SELinux 规则只给了 droidspacesd 域 connectto：服务端（awl_daemon）
+在已接受的 socket 上仍缺 accept/read/write/getopt/setopt，于是连接建立后又被静默
+丢弃 —— `libpipewire-module-pulse-tunnel` 报 "can't connect: Host is down"，容器
+退回 auto_null 而不是 Android sink。缺的是三处：服务端 socket 权限、运行目录
+（shell_data_file 及其下的 system_data_file）的 search 权限（打开 socket inode 之前
+必须能穿越该目录）、以及宿主 PulseAudio 的 auth-group=any（让容器里的匿名客户端被
+接受）。
+
+**容器客户端无法向宿主 PulseAudio 认证。** 容器以另一个 uid 运行，读不到
+PulseAudio 的 home 目录，因此无从认证：匿名握手被拒，tunnel 以
+"can't connect: Host is down" 放弃。现在 cookie 发布到运行目录，该目录以
+/run/anland 绑定挂载进容器。
+
+## v6.2.9
+
+### 修复
+
+**PulseAudio 在 Android 17 上初始化 OpenSL ES 失败**（SL_RESULT_RESOURCE_ERROR）。
+Android 17（SDK 37+）强制执行后台音频加固 —— 无论 uid 如何，任何后台进程创建
+AudioTrack / AAudioStream 都会被拒绝。com.anlandnext 既没有 Activity 也没有前台
+服务，因此每次开机 PulseAudio 都记录 `module-sles-sink.c: Failed to initialize
+OpenSL ES: error 9` 并退回 auto_null。PipeWire pulse-tunnel 没有可隧道的东西，
+容器音频一直是静音。service.sh 现在在启动 PulseAudio 之前调用 am start 把 APK 拉到
+前台。初始 AudioTrack 建立后 Activity 可以回到桌面，后续播放不受影响 —— 加固只拦
+createTrack，不拦正常播放。限在 SDK 37+，因此 Android 17 之前的设备行为不变。
+
+> **注：** SDK 门限过窄 —— Android 16（SDK 36）同样受影响。见 v6.2.10。
+
 ## v6.2.8
 
 ### 修复

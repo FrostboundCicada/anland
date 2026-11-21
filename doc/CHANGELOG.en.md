@@ -76,8 +76,10 @@ refused while the device is locked, so PulseAudio hit the same createTrack
 rejection and ended up on auto_null. The APK is now brought up repeatedly and
 the script waits for the Activity to actually reach RESUMED. The foreground
 call also moved into the start-up retry loop, because on a cold boot the
-first am start is refused while the launcher is still coming up - that left
-the recorder muted for the whole session.
+first am start is refused while the launcher is still coming up — without it
+the sink stayed on auto_null for the whole boot. This entry is about the
+playback path only: the recorder was muted by a different mechanism (the
+foreground-only RECORD_AUDIO app-op), fixed separately by AudioBridgeService.
 
 **Container audio handshake fails with PA_ERR_HOSTDOWN.** The container
 reaches the host PulseAudio over the anland runtime socket, but the SELinux
@@ -97,6 +99,7 @@ directory, so it had no way to authenticate: the anonymous handshake was
 rejected and the tunnel gave up with "can't connect: Host is down". The cookie
 is now published in the runtime directory, which is bind-mounted into the
 container as /run/anland.
+
 ## 6.2.9 - 2026-11-21
 
 ### Fixed
