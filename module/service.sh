@@ -102,6 +102,18 @@ bring_to_foreground() {
   return 0
 }
 
+hold_audio_foreground() {
+  # RECORD_AUDIO is a foreground-only app-op: AudioPolicyManager silences the
+  # record path as soon as the app uid stops being foreground, and the sles
+  # source then feeds libpulse a stream of zeros (symptom: parecord writes a
+  # full-length all-zero file, and the container microphone is silent).  An
+  # Activity is not enough — the container windows are transient and the user
+  # may lock the screen mid-recording — so the APK runs a foreground service
+  # for as long as PulseAudio lives.  Older APKs without the service make this
+  # a no-op and keep the previous bring_to_foreground behaviour.
+  am start-foreground-service -n com.anlandnext/.AudioBridgeService >/dev/null 2>&1 || true
+}
+
 stop_pulse() {
   # The runtime copy is disposable, but the process must be stopped before it
   # is replaced.  Otherwise an old instance can keep the old UID/audio state
@@ -262,6 +274,7 @@ start_pulse() {
     # am start is refused (the launcher is not up yet), so the Activity is
     # still invisible and the recorder comes up muted.
     bring_to_foreground
+    hold_audio_foreground
     if launch_pulse "$attempt" && wait_for_pulse; then
       echo "anland: pulse ready (Android sink)" >> "$LOG"
     # Container clients need the server cookie to authenticate: the container

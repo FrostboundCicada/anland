@@ -9,6 +9,12 @@
          否则 pm grant 无效、录音被系统拒绝（SL_RESULT_RESOURCE_ERROR）。 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
+    <!-- RECORD_AUDIO is a foreground-only app-op: the framework silences the
+         record path once com.anlandnext stops being foreground, which reaches
+         the container as a silent microphone. AudioBridgeService holds the uid
+         foreground without a window, so no Activity has to stay on screen. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -56,5 +62,14 @@
                 <action android:name="anland.WINDOW_GONE"/>
             </intent-filter>
         </receiver>
+
+        <!-- Started by module/service.sh before PulseAudio: keeps the uid
+             foreground so the sles source keeps receiving PCM while the screen
+             is off or no anland window is visible. exported so the daemon can
+             start it with am; it holds no privileged state. -->
+        <service
+            android:name=".AudioBridgeService"
+            android:exported="true"
+            android:label="Anland AudioBridge"/>
     </application>
 </manifest>

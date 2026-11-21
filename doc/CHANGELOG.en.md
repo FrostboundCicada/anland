@@ -41,6 +41,24 @@ holds a DIRECT_RECORD track, which left the container with a muted microphone.
 
 ### Fixed
 
+**The container microphone is silent whenever no anland window is on screen.**
+RECORD_AUDIO is granted in the foreground-only app-op mode, and
+AudioPolicyManager re-applies the record silencing the moment the app uid stops
+being foreground: the log shows `startInput on silenced input ... Unsilencing`
+followed by `setRecordSilenced(general), silenced 1` in the same millisecond, and
+the sles source then hands every libpulse client a full-length all-zero stream —
+parecord writes a file of the right size and the container records pure silence.
+Recording therefore only worked while an anland Activity was visible on an
+unlocked, awake screen, which a container desktop cannot guarantee. The APK now
+runs AudioBridgeService — a foreground service started by service.sh before
+PulseAudio — which keeps the app uid foreground with no window and only a
+minimum-importance notification. Measured on 2410CRP4CG / Android 16: with the
+launcher in front and the screen off, a 3 s capture is 95.6% non-zero samples
+(peak 562) instead of an all-zero file. targetSdk stays 29, so the API 34
+FOREGROUND_SERVICE_MICROPHONE requirement and the while-in-use start restriction
+do not apply; an older APK without the service makes the call a no-op and keeps
+the Activity-based behaviour.
+
 **PulseAudio fails to initialize OpenSL ES on Android 16** (SL_RESULT_RESOURCE_ERROR).
 Background audio hardening starts at Android 16 (SDK 36), not Android 17: AudioTrack /
 AAudioStream creation is rejected for any process without a visible Activity or a
