@@ -260,6 +260,19 @@ start_pulse() {
     stop_pulse
     if launch_pulse "$attempt" && wait_for_pulse; then
       echo "anland: pulse ready (Android sink)" >> "$LOG"
+    # Container clients need the server cookie to authenticate: the container
+    # runs under a different uid and cannot read $RT/pulse-home.  Publish it
+    # in the runtime directory (bind-mounted as /run/anland in the container)
+    # once PulseAudio has written it.
+    cookie_wait=0
+    while [ ! -f "$PH/.config/pulse/cookie" ] && [ "$cookie_wait" -lt 10 ]; do
+      sleep 1
+      cookie_wait=$(( cookie_wait + 1 ))
+    done
+    if [ -f "$PH/.config/pulse/cookie" ]; then
+      cp -f "$PH/.config/pulse/cookie" "$RT/pulse-cookie" 2>/dev/null &&
+        chmod 644 "$RT/pulse-cookie" 2>/dev/null
+    fi
       return 0
     fi
 
