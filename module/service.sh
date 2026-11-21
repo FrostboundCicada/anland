@@ -210,6 +210,9 @@ start_pulse() {
   # make AudioRecord fail with SL_RESULT_CONTENT_UNSUPPORTED and the
   # container would see no capture source at all.
   pm grant com.anlandnext android.permission.RECORD_AUDIO 2>/dev/null || true
+  # Android 10+ gates the microphone behind an appop as well; without this the
+  # recorder stays muted even with the permission granted.
+  appops set com.anlandnext RECORD_AUDIO allow 2>/dev/null || true
 
   # a previous instance (repair path, or an app reinstall that changed the
   # uid) still holds the old tree and socket — replace it whole
