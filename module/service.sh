@@ -67,7 +67,7 @@ start_daemon() {
 # is at most about 23s when the audio service is unavailable.
 PULSE_PROBE_TIMEOUT=2
 PULSE_PROBE_POLLS=4
-PULSE_START_RETRIES=2
+PULSE_START_RETRIES=4
 
 bring_to_foreground() {
   local sdk
@@ -252,12 +252,16 @@ start_pulse() {
   # module lookup: daemon.conf is read from PULSE_CONFIG_PATH (this copy)
   echo "dl-search-path = $PAR/lib/pulseaudio/modules" >> "$PAR/etc/pulse/daemon.conf"
 
-  # Android 17+: foreground the APK so createTrack doesn't get rejected.
-  bring_to_foreground
+  # Android 16+: foreground the APK so createTrack doesn't get rejected.
+  # The call is repeated per attempt inside the loop below.
 
   attempt=1
   while [ "$attempt" -le "$PULSE_START_RETRIES" ]; do
     stop_pulse
+    # Foreground the APK before every attempt: on a cold boot the first
+    # am start is refused (the launcher is not up yet), so the Activity is
+    # still invisible and the recorder comes up muted.
+    bring_to_foreground
     if launch_pulse "$attempt" && wait_for_pulse; then
       echo "anland: pulse ready (Android sink)" >> "$LOG"
     # Container clients need the server cookie to authenticate: the container

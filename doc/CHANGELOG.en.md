@@ -56,7 +56,10 @@ therefore missed Android 16 devices.
 call ran once and then slept three seconds; on a cold boot am start is still
 refused while the device is locked, so PulseAudio hit the same createTrack
 rejection and ended up on auto_null. The APK is now brought up repeatedly and
-the script waits for the Activity to actually reach RESUMED.
+the script waits for the Activity to actually reach RESUMED. The foreground
+call also moved into the start-up retry loop, because on a cold boot the
+first am start is refused while the launcher is still coming up - that left
+the recorder muted for the whole session.
 
 **Container audio handshake fails with PA_ERR_HOSTDOWN.** The container
 reaches the host PulseAudio over the anland runtime socket, but the SELinux
