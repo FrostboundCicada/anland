@@ -4,6 +4,11 @@
     <!-- 「窗口打开时显示设置通知」（anland5 设置），API 33+ 需运行时授权 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- 麦克风：宿主侧的 PulseAudio 以 com.anlandnext 的 uid 运行，
+         sles SOURCE 模块要建 AudioRecord 必须由该包声明 RECORD_AUDIO，
+         否则 pm grant 无效、录音被系统拒绝（SL_RESULT_RESOURCE_ERROR）。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
