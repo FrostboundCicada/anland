@@ -35,7 +35,7 @@ stayed empty and every block PulseAudio received was the zeroed allocation. The
 queue is now primed when the source opens. The module also posted a memblock
 that wrapped the live recorder buffer and then re-armed the queue, letting the
 recorder rewrite the block while PulseAudio was still reading it; each captured
-block is copied out first. The recorder also runs with the MIC preset instead
+block is copied out first. The recorder also runs with the generic (MIC) preset instead
 of VOICE_RECOGNITION: Android silences the latter whenever another client
 holds a DIRECT_RECORD track, which left the container with a muted microphone.
 

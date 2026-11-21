@@ -260,7 +260,7 @@ static int pa_init_sles_record(struct userdata *u, pa_sample_spec *ss) {
 
     // update the configuration
     CHK((*u->RecorderObject)->GetInterface(u->RecorderObject, SL_IID_ANDROIDCONFIGURATION, &u->ConfigurationItf));
-    CHK((*u->ConfigurationItf)->SetConfiguration(u->ConfigurationItf, SL_ANDROID_KEY_RECORDING_PRESET, &(SLuint32){SL_ANDROID_RECORDING_PRESET_MIC}, sizeof(SLuint32)));
+    CHK((*u->ConfigurationItf)->SetConfiguration(u->ConfigurationItf, SL_ANDROID_KEY_RECORDING_PRESET, &(SLuint32){SL_ANDROID_RECORDING_PRESET_GENERIC}, sizeof(SLuint32)));
 
     // realize the recorder
     CHK((*u->RecorderObject)->Realize(u->RecorderObject, SL_BOOLEAN_FALSE));
