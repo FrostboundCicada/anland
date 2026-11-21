@@ -17,6 +17,12 @@ content is archived below.
 
 ### Fixed
 
+**PulseAudio falls back to a null sink on a cold boot.** The foreground
+call ran once and then slept three seconds; on a cold boot am start is still
+refused while the device is locked, so PulseAudio hit the same createTrack
+rejection and ended up on auto_null. The APK is now brought up repeatedly and
+the script waits for the Activity to actually reach RESUMED.
+
 **Container audio handshake fails with PA_ERR_HOSTDOWN.** The container
 reaches the host PulseAudio over the anland runtime socket, but the SELinux
 rule only granted the droidspacesd domain connectto: the server side
@@ -25,9 +31,10 @@ socket, so the connection was established and then silently dropped —
 libpipewire-module-pulse-tunnel reported "can't connect: Host is down" and the
 container fell back to auto_null instead of the Android sink. Three pieces
 were missing: the server-side socket permissions, the search permission on
-the runtime directory (shell_data_file) that has to be traversed before the
-socket inode can be opened, and auth-group=any on the host PulseAudio so
-anonymous clients from the container are accepted.
+the runtime directory (shell_data_file and the underlying
+system_data_file) that has to be traversed before the socket inode can be
+opened, and auth-group=any on the host PulseAudio so anonymous clients from
+the container are accepted.
 
 ### Added
 

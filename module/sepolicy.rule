@@ -95,6 +95,10 @@ allow droidspacesd awl_runtime_sock sock_file { open read write getattr setattr 
 # silently: connect() succeeds but the PulseAudio handshake never happens,
 # so the tunnel reports "can't connect: Host is down".
 allow droidspacesd shell_data_file dir { search getattr read open }
+# The runtime directory is bind-mounted into the container: SELinux checks
+# the label of the underlying filesystem (system_data_file for /data) when the
+# lookup crosses the mount, so the container needs search on that type too.
+allow droidspacesd system_data_file dir { search getattr read open }
 allow droidspacesd awl_daemon unix_stream_socket connectto
 # The server side of the runtime socket: awl_daemon has to accept() the
 # container connection and then read/write/getopt/setopt on that socket.
@@ -104,7 +108,6 @@ allow droidspacesd awl_daemon unix_stream_socket connectto
 # PulseAudio reports PA_ERR_HOSTDOWN and libpipewire-module-pulse-tunnel
 # gives up with "can't connect: Host is down".
 allow awl_daemon self unix_stream_socket { read write getopt setopt accept }
-allow awl_daemon unix_stream_socket { read write getopt setopt accept }
 # service.sh relabels its pactl health probe as awl_daemon_exec; it therefore
 # connects to the PulseAudio server from the same domain.
 allow awl_daemon awl_daemon unix_stream_socket connectto

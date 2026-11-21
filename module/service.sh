@@ -78,14 +78,28 @@ bring_to_foreground() {
   [ "${sdk:-0}" -ge 36 ] || return 0
   # MainActivity exists in every com.anlandnext build and has a launcher
   # intent; EXCLUDE_FROM_RECENTS keeps the user's recent-tasks list clean.
-  am start -n com.anlandnext/.MainActivity \
-    --activity-clear-top \
-    --activity-brought-to-front \
-    --activity-exclude-from-recents \
-    >/dev/null 2>&1 || true
-  # Wait for the Activity to reach RESUMED before pulseaudio tries createTrack.
-  # On cold boot the APK may take a moment; 3s covers both warm and cold starts.
-  sleep 3
+  #
+  # am start is refused while the device is still locked / the launcher has
+  # not come up yet, so retry it and then wait for the Activity to actually
+  # reach RESUMED.  A fixed sleep is not enough on a cold boot: pulseaudio
+  # then hits the same createTrack rejection (OpenSL ES error 9) and falls
+  # back to auto_null.
+  local attempt waited
+  for attempt in 1 2 3 4 5; do
+    am start -n com.anlandnext/.MainActivity \
+      --activity-clear-top \
+      --activity-brought-to-front \
+      --activity-exclude-from-recents \
+      >/dev/null 2>&1 || true
+    for waited in 1 2 3 4 5 6 7 8 9 10; do
+      if dumpsys activity activities 2>/dev/null | grep -q "ResumedActivity.*com.anlandnext"; then
+        return 0
+      fi
+      sleep 1
+    done
+  done
+  # Last resort: the Activity may still be blocked, but pulseaudio can try.
+  return 0
 }
 
 stop_pulse() {
