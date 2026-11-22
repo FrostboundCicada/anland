@@ -42,6 +42,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Launcher entry point for pinned shortcuts: launches one container
+             application and finishes (see AppShortcutActivity). -->
+        <activity
+            android:name=".AppShortcutActivity"
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
         <!-- 硬件键拦截（对齐 anland5 的 KeyInterceptor）：Fn/F1-F12、Back→ESC -->
         <service
             android:name=".KeyInterceptor"

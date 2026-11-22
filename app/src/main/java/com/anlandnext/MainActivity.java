@@ -3,8 +3,15 @@ package com.anlandnext;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.ShortcutInfo;
+import android.content.pm.ShortcutManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.Icon;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -14,8 +21,11 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.anlandnext.awl.Awl;
 
@@ -40,7 +50,11 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int MENU_CLOSE = 1;
     private static final int MENU_INFO = 2;
+    private static final int MENU_PIN = 3;
 
+    /** true while the "Apps" tab is selected (refresh() would otherwise
+     *  overwrite the application list with window rows) */
+    private boolean showApps;
     private LinearLayout list;
     private TextView status;
 
@@ -74,6 +88,27 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(this, WlSettingsActivity.class)));
         root.addView(settings);
 
+        /* Windows / Apps switch. The window list can only show windows that
+         * already exist; anland 6.x has no desktop environment to start new
+         * container software, so the catalogue comes from the container-side
+         * anland-apps tool over binder. */
+        RadioGroup tabs = new RadioGroup(this);
+        tabs.setOrientation(RadioGroup.HORIZONTAL);
+        RadioButton tabWindows = new RadioButton(this);
+        tabWindows.setId(101);
+        tabWindows.setText(R.string.tab_windows);
+        RadioButton tabApps = new RadioButton(this);
+        tabApps.setId(102);
+        tabApps.setText(R.string.tab_apps);
+        tabs.addView(tabWindows);
+        tabs.addView(tabApps);
+        tabWindows.setChecked(true);
+        tabs.setOnCheckedChangeListener((g, id) -> {
+            showApps = (id == 102);
+            if (showApps) refreshApps(); else refresh();
+        });
+        root.addView(tabs);
+
         ScrollView sc = new ScrollView(this);
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -105,6 +140,7 @@ public class MainActivity extends Activity {
     }
 
     private void refresh() {
+        if (showApps) return;   /* the Apps tab owns the list while selected */
         list.removeAllViews();
         List<Awl.WlWindow> wins = Awl.getWindows();
         if (wins == null) {
@@ -121,6 +157,105 @@ public class MainActivity extends Activity {
             empty.setPadding(0, 96, 0, 0);
             list.addView(empty);
         }
+    }
+
+    /** Container application catalogue (the "Apps" tab). The daemon relays the
+     *  container-side anland-apps listing; empty means daemon or container is
+     *  down, which anland 6.x cannot fix from here. */
+    private void refreshApps() {
+        list.removeAllViews();
+        List<WlBinder.AppEntry> apps = WlBinder.appsList("");
+        if (apps.isEmpty()) {
+            status.setText(R.string.apps_unavailable);
+            TextView empty = new TextView(this);
+            empty.setText(R.string.apps_empty);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(0, 96, 0, 0);
+            list.addView(empty);
+            return;
+        }
+        status.setText(getString(R.string.apps_count, apps.size()));
+        for (WlBinder.AppEntry a : apps) {
+            if (a.noDisplay) continue;      /* NoDisplay/Hidden entries stay callable by id but are not listed */
+            list.addView(appRow(a));
+        }
+    }
+
+    private View appRow(WlBinder.AppEntry a) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(24, 28, 24, 28);
+
+        TextView t = new TextView(this);
+        t.setText(a.name);
+        t.setTextSize(16);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        r.addView(t, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        r.setOnClickListener(v -> {
+            int rc = WlBinder.appsRun("", a.id);
+            if (rc != 0) {
+                Toast.makeText(this, getString(R.string.apps_launch_failed, a.name),
+                        Toast.LENGTH_SHORT).show();
+            }
+            /* the new window is fronted by the module's anland-focus-new poller */
+        });
+        r.setOnLongClickListener(v -> {
+            PopupMenu pm = new PopupMenu(this, v);
+            pm.getMenu().add(Menu.NONE, MENU_PIN, MENU_PIN, R.string.apps_menu_shortcut);
+            pm.setOnMenuItemClickListener(item -> {
+                if (item.getItemId() == MENU_PIN) { pinShortcut(a); return true; }
+                return false;
+            });
+            pm.show();
+            return true;
+        });
+        return r;
+    }
+
+    /** Ask the launcher to pin a home-screen shortcut that launches this app. */
+    private void pinShortcut(WlBinder.AppEntry a) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Toast.makeText(this, R.string.apps_pin_unsupported, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent launch = new Intent(this, AppShortcutActivity.class)
+                .setAction(Intent.ACTION_VIEW)
+                .putExtra(AppShortcutActivity.EXTRA_APP_ID, a.id)
+                .putExtra(AppShortcutActivity.EXTRA_APP_NAME, a.name);
+        Icon icon = Icon.createWithBitmap(letterIcon(a.name));
+        ShortcutInfo si = new ShortcutInfo.Builder(this, "anland-app-" + a.id)
+                .setShortLabel(a.name)
+                .setLongLabel(a.name)
+                .setIcon(icon)
+                .setIntent(launch)
+                .build();
+        ShortcutManager sm = getSystemService(ShortcutManager.class);
+        if (sm == null || !sm.isRequestPinShortcutSupported()) {
+            Toast.makeText(this, R.string.apps_pin_unsupported, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        sm.requestPinShortcut(si, null);
+    }
+
+    /** Simple letter avatar; a .desktop icon pipeline can replace it later. */
+    private Bitmap letterIcon(String name) {
+        int size = 192;
+        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0xFF2B579A);
+        c.drawRoundRect(0, 0, size, size, 36, 36, p);
+        p.setColor(0xFFFFFFFF);
+        p.setTextAlign(Paint.Align.CENTER);
+        p.setTextSize(104);
+        p.setTypeface(Typeface.DEFAULT_BOLD);
+        String letter = name == null || name.isEmpty() ? "?"
+                : name.substring(0, 1).toUpperCase(java.util.Locale.getDefault());
+        c.drawText(letter, size / 2f, size / 2f - (p.descent() + p.ascent()) / 2f, p);
+        return bmp;
     }
 
     private View row(Awl.WlWindow w) {

@@ -80,4 +80,13 @@
     <string name="immersive_bind">绑定沉浸式按键</string>
     <string name="immersive_bind_listening">请按下要绑定的按键…</string>
     <string name="immersive_current">当前：%1$s</string>
+    <string name="tab_windows">窗口</string>
+    <string name="tab_apps">应用</string>
+    <string name="apps_empty">容器内没有找到应用
+（先启动容器并安装软件）</string>
+    <string name="apps_unavailable">容器应用列表不可用（守护进程或容器未运行）</string>
+    <string name="apps_count">应用数: %1$d</string>
+    <string name="apps_menu_shortcut">创建桌面快捷方式</string>
+    <string name="apps_launch_failed">无法启动 %1$s</string>
+    <string name="apps_pin_unsupported">当前启动器不支持钉快捷方式</string>
 </resources>
