@@ -21,23 +21,6 @@ public final class WlBinder {
     private static final String DESCRIPTOR = "anland.IHost";
     public static final int T_CFG_GET = 12;   /* (key) → val: read a daemon config (#31) */
     public static final int T_CFG_SET = 13;   /* (key,val) → ok: apply + persist in daemon (#31) */
-    public static final int T_APPS_LIST = 19; /* (container) → count + records: container app catalogue */
-    public static final int T_APPS_RUN = 20;  /* (container,appid) → ok: launch one container app */
-
-    /** One entry of the container application catalogue. */
-    public static final class AppEntry {
-        public final String id;
-        public final String name;
-        public final boolean terminal;
-        public final boolean noDisplay;
-
-        AppEntry(String id, String name, boolean terminal, boolean noDisplay) {
-            this.id = id;
-            this.name = name;
-            this.terminal = terminal;
-            this.noDisplay = noDisplay;
-        }
-    }
 
     private static IBinder s;
 
@@ -99,61 +82,6 @@ public final class WlBinder {
             return r.dataSize() >= 4 ? r.readInt() : -1;
         } catch (Exception e) {
             Log.e(TAG, "CFG_SET failed", e);
-            s = null;
-            return -1;
-        } finally {
-            d.recycle();
-            r.recycle();
-        }
-    }
-
-    /** Container application catalogue; empty when the daemon or the container
-     *  is unavailable (pass "" to use the daemon's configured container). */
-    public static java.util.List<AppEntry> appsList(String container) {
-        java.util.List<AppEntry> out = new java.util.ArrayList<>();
-        IBinder b = get();
-        if (b == null) return out;
-        Parcel d = Parcel.obtain();
-        Parcel r = Parcel.obtain();
-        try {
-            d.writeInterfaceToken(DESCRIPTOR);
-            d.writeString(container == null ? "" : container);
-            b.transact(T_APPS_LIST, d, r, 0);
-            if (r.dataSize() < 4) return out;
-            r.setDataPosition(0);
-            int n = r.readInt();
-            if (n <= 0) return out;
-            for (int i = 0; i < n; i++) {
-                String id = r.readString();
-                String name = r.readString();
-                boolean terminal = r.readInt() != 0;
-                boolean noDisplay = r.readInt() != 0;
-                if (id != null && !id.isEmpty()) out.add(new AppEntry(id, name, terminal, noDisplay));
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "APPS_LIST failed", e);
-            s = null;
-        } finally {
-            d.recycle();
-            r.recycle();
-        }
-        return out;
-    }
-
-    /** Launch a container application by id; 0 = success. */
-    public static int appsRun(String container, String appid) {
-        IBinder b = get();
-        if (b == null) return -1;
-        Parcel d = Parcel.obtain();
-        Parcel r = Parcel.obtain();
-        try {
-            d.writeInterfaceToken(DESCRIPTOR);
-            d.writeString(container == null ? "" : container);
-            d.writeString(appid);
-            b.transact(T_APPS_RUN, d, r, 0);
-            return r.dataSize() >= 4 ? r.readInt() : -1;
-        } catch (Exception e) {
-            Log.e(TAG, "APPS_RUN failed", e);
             s = null;
             return -1;
         } finally {

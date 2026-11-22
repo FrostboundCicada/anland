@@ -80,13 +80,4 @@
     <string name="immersive_bind">Bind immersive key</string>
     <string name="immersive_bind_listening">Press the key to bind…</string>
     <string name="immersive_current">Current: %1$s</string>
-    <string name="tab_windows">Windows</string>
-    <string name="tab_apps">Apps</string>
-    <string name="apps_empty">No applications found in the container
-(start the container and install software)</string>
-    <string name="apps_unavailable">container app list unavailable (daemon or container down)</string>
-    <string name="apps_count">Applications: %1$d</string>
-    <string name="apps_menu_shortcut">Create home screen shortcut</string>
-    <string name="apps_launch_failed">could not launch %1$s</string>
-    <string name="apps_pin_unsupported">this launcher cannot pin shortcuts</string>
 </resources>
