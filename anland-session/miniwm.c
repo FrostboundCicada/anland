@@ -118,6 +118,147 @@ static void redir_forget(Window w) {
         }
 }
 
+/* ---- O-R popup adoption -----------------------------------------------
+ * Rootless Xwayland (24.1) gives an override-redirect window a wl_surface and
+ * an association serial, but never commits a buffer for it: an O-R window is
+ * not tracked for damage, so the awl daemon — which creates the Android window
+ * on the first commit — never shows it (observed: "surface N associated" then
+ * "surface N destroyed (mapped=0)").
+ *
+ * A managed frame does commit, and the X server already paints an O-R child
+ * into its parent's window pixmap, so putting the popup in a frame is the whole
+ * fix: the frame maps through MapRequest -> redirect -> real Android window,
+ * and the menu/tooltip/drag icon is inside it.
+ *
+ * Only root children are adopted: an O-R child of a managed window is already
+ * part of that window's pixmap, and RedirectWindow on it would REMOVE it from
+ * there (that union is what makes redirected windows uncomposited). */
+/* helpers defined further down (set_wm_state, frame_nudge) */
+static void set_wm_state(Display* d, Window w, unsigned long state);
+
+
+/* ---- O-R popup adoption -----------------------------------------------
+ * Rootless Xwayland (24.1) gives an override-redirect window a wl_surface and
+ * an association serial, but never commits a buffer for it: an O-R window is
+ * not tracked for damage, so the awl daemon — which creates the Android window
+ * on the first commit — never shows it (observed: "surface N associated" then
+ * "surface N destroyed (mapped=0)").
+ *
+ * A managed frame does commit, and the X server already paints an O-R child
+ * into its parent's window pixmap, so putting the popup in a frame is the whole
+ * fix: the frame maps through MapRequest -> redirect -> real Android window,
+ * and the menu/tooltip/drag icon is inside it.
+ *
+ * Only root children are adopted: an O-R child of a managed window is already
+ * part of that window's pixmap, and RedirectWindow on it would REMOVE it from
+ * there (that is what makes redirected windows uncomposited). */
+#define MAX_FRAMES 64
+static struct { Window popup, frame; } s_frames[MAX_FRAMES];
+static int s_n_frames = 0;
+/* Reparenting a mapped window unmaps it for a moment. A client may read that
+ * echo as "my menu was dismissed", so the first UnmapNotify of a window we
+ * just adopted is dropped. */
+static Window s_skip_unmap[MAX_FRAMES];
+static int s_n_skip = 0;
+
+static Window frame_of_popup(Window w) {
+    for (int i = 0; i < s_n_frames; i++)
+        if (s_frames[i].popup == w) return s_frames[i].frame;
+    return None;
+}
+
+static Window popup_of_frame(Window f) {
+    for (int i = 0; i < s_n_frames; i++)
+        if (s_frames[i].frame == f) return s_frames[i].popup;
+    return None;
+}
+
+static void frame_drop_pair(Display* d, int i) {
+    Window f = s_frames[i].frame;
+    s_frames[i] = s_frames[--s_n_frames];
+    XDestroyWindow(d, f);
+}
+
+/* The popup's content predates the frame's pixmap, and Xwayland only exports a
+ * window pixmap after it sees damage. Dirty one pixel (with an Expose so a
+ * toolkit repaints its own content): resizing the frame instead trips a
+ * wl_display invalid-object error in Xwayland and takes the session down. */
+static void frame_nudge(Display* d, Window f) {
+    Window p = popup_of_frame(f);
+    if (p == None) return;
+    XClearArea(d, p, 0, 0, 1, 1, True);
+    XSync(d, False);
+    fprintf(stderr, "mini-wm: nudged frame 0x%lx (popup 0x%lx)\n", f, p);
+}
+
+static void frame_adopt(Display* d, Window root, Window w) {
+    if (w == root || frame_of_popup(w) != None) return;
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(d, w, &wa)) return;
+    if (!wa.override_redirect) return;   /* managed: MapRequest already took it */
+    Window rr, pr, *kids = NULL;
+    unsigned n = 0;
+    if (!XQueryTree(d, w, &rr, &pr, &kids, &n)) return;
+    if (kids) XFree(kids);
+    if (pr != root) return;              /* inside a managed window: painted there */
+    if (s_n_frames >= MAX_FRAMES) return;
+    int fw = wa.width > 0 ? wa.width : 1;
+    int fh = wa.height > 0 ? wa.height : 1;
+    Window f = XCreateSimpleWindow(d, root, 0, 0, (unsigned)fw, (unsigned)fh,
+                                   0, 0, None);
+    if (f == None) return;
+    s_frames[s_n_frames].popup = w;
+    s_frames[s_n_frames].frame = f;
+    s_n_frames++;
+    if (s_n_skip < MAX_FRAMES) s_skip_unmap[s_n_skip++] = w;
+    XReparentWindow(d, w, f, 0, 0);
+    XMapWindow(d, w);        /* the reparent unmapped it */
+    /* A client's own MapWindow is never turned into a MapRequest for itself
+     * (X11 MapWindow: only "some other client" redirecting causes that), so the
+     * frame has to be redirected and mapped right here, the way the MapRequest
+     * path does it for foreign windows. */
+    redir_redirect(d, f);
+    XMapWindow(d, f);
+    set_wm_state(d, f, NormalState);
+    XSync(d, False);
+    frame_nudge(d, f);
+    fprintf(stderr, "mini-wm: adopted O-R 0x%lx into frame 0x%lx (%dx%d)\n",
+            w, f, fw, fh);
+}
+
+static void frame_unmapped(Display* d, Window w) {
+    for (int i = 0; i < s_n_skip; i++)
+        if (s_skip_unmap[i] == w) {
+            s_skip_unmap[i] = s_skip_unmap[--s_n_skip];
+            return;                       /* reparent echo, not a dismissal */
+        }
+    for (int i = 0; i < s_n_frames; i++)
+        if (s_frames[i].popup == w) { frame_drop_pair(d, i); return; }
+}
+
+static void frame_destroyed(Display* d, Window w) {
+    for (int i = 0; i < s_n_frames; i++)
+        if (s_frames[i].popup == w) { frame_drop_pair(d, i); return; }
+    /* the frame going away first (shouldn't happen) still drops the pair */
+    for (int i = 0; i < s_n_frames; i++)
+        if (s_frames[i].frame == w) {
+            s_frames[i] = s_frames[--s_n_frames];
+            return;
+        }
+}
+
+/* a popup that resizes itself must not get clipped by a stale frame */
+static void frame_resized(Display* d, Window w) {
+    Window f = frame_of_popup(w);
+    if (f == None) return;
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(d, w, &wa)) return;
+    if (wa.width > 0 && wa.height > 0)
+        XResizeWindow(d, f, (unsigned)wa.width, (unsigned)wa.height);
+}
+
+
+
 static void set_wm_state(Display* d, Window w, unsigned long state) {
     static Atom wm_state = None;
     if (wm_state == None) wm_state = XInternAtom(d, "WM_STATE", False);
@@ -315,18 +456,18 @@ int main(void) {
             switch (e.type) {
             case MapNotify: {
                 /* O-R popups (menus, tooltips, DnD icons) map themselves: no
-                 * MapRequest, and Xwayland only builds a wl_surface once the
-                 * window is redirected — redirect here so they surface at all. */
-                Window w = e.xmap.window;
-                XWindowAttributes wa;
-                if (w == root || !XGetWindowAttributes(d, w, &wa)) break;
-                if (!wa.override_redirect) break;   /* managed: MapRequest did it */
-                redir_redirect(d, w);
-                XRaiseWindow(d, w);   /* a popup belongs above its owner */
-                fprintf(stderr, "mini-wm: surfaced O-R 0x%lx (%dx%d)\n",
-                        w, wa.width, wa.height);
+                 * MapRequest, and the surface Xwayland builds for them never
+                 * gets a committed buffer. Adopt them in a frame instead —
+                 * see the O-R block above. */
+                frame_adopt(d, root, e.xmap.window);
                 break;
             }
+            case UnmapNotify:
+                frame_unmapped(d, e.xunmap.window);
+                break;
+            case ConfigureNotify:
+                frame_resized(d, e.xconfigure.window);
+                break;
             case MapRequest: {
                 Window w = e.xmaprequest.window;
                 XMoveWindow(d, w, 0, 0);   /* (0,0) pin, see the header (covers a CreateWindow position) */
@@ -334,6 +475,7 @@ int main(void) {
                 XMapWindow(d, w);
                 set_wm_state(d, w, NormalState);
                 XSetInputFocus(d, w, RevertToPointerRoot, CurrentTime);
+                frame_nudge(d, w);
                 fprintf(stderr, "mini-wm: mapped 0x%lx\n", w);
                 break;
             }
@@ -371,6 +513,7 @@ int main(void) {
             case DestroyNotify:
                 pair_forget_window(e.xdestroywindow.window);
                 redir_forget(e.xdestroywindow.window);
+                frame_destroyed(d, e.xdestroywindow.window);
                 break;
             default:
                 break;   /* Create/Unmap/Configure Notify etc.: Xwayland's own business */
