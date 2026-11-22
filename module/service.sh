@@ -35,6 +35,16 @@ start_daemon() {
   chcon u:object_r:awl_daemon_exec:s0 "$MODDIR/waylandbridge" 2>/dev/null
   rm -f "$RT/wayland-0"
   nohup "$MODDIR/waylandbridge" > /data/local/tmp/awl_daemon.log 2>&1 &
+  # 新窗口自动置前。
+  #
+  # Android 同一时刻只让一个 AwlWindowActivity 任务可见：在另一个任务处于
+  # 焦点时创建的任务会以 visible=false 落在后面。Steam 点「开始游戏」后游戏
+  # 窗口在跑却看不见、屏幕上仍是 Steam，原因就在这里；把那个任务前置才出现。
+  chmod 755 "$MODDIR/anland-focus-new.sh" 2>/dev/null
+  if [ -f "$MODDIR/anland-focus-new.sh" ]; then
+    pkill -f "$MODDIR/anland-focus-new.sh" 2>/dev/null
+    nohup "$MODDIR/anland-focus-new.sh" > /data/local/tmp/anland-focus.log 2>&1 &
+  fi
 }
 
 # ---- PulseAudio (module pulse/: Termux OpenSL ES / AAudio sink) — the Linux
