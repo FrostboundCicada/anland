@@ -13,6 +13,35 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
+## 6.2.11 - 2026-11-22
+
+### Fixed
+
+**X popups were forced fullscreen, so Steam context menus landed in the wrong
+place.** anland 6 gives every X toplevel its own Android window and stretches
+that window over the screen. That holds for a main window; it does not hold for
+an override-redirect popup (context menu, drop-down, completion list), which is
+a small rectangle attached at a position. Promoted to a full-screen window it
+no longer sits next to the pointer and taps miss it. mini-wm now recognises O-R
+windows, reparents them into the toplevel under the pointer and keeps their
+absolute origin, so drawing and hit testing both happen at (100,100)-style
+coordinates. Verified with test_ord5: the journal shows
+`mini-wm: mapped 0x400001`, then
+`adopted O-R 0x400002 into 0x400001 at 100,100 (200x120)`, and the red menu is
+drawn at (100,100) inside the window rather than at the screen origin.
+
+**One transient portrait window pinned the X screen at a square size.** The
+wl_output mode was a per-axis running maximum that never came down: once a
+window larger than the current mode appeared, the mode only grew. On a
+2780x1264 device this is fatal — while negotiating its size Xwayland first
+attaches a 1264x2780 portrait window and only then turns into 2780x1264, which
+left the X screen at 2780x2780 for the rest of the session, and every
+fullscreen client read a 1:1 screen from RandR. The demand is now tracked per
+window id: the mode is the per-axis maximum over live windows, floored at the
+boot mode, and a shrink or a destroy (awl_output_forget) returns that window's
+demand. Measured mode sequence: `1280x720 → 1280x2780 → 2780x1264`, and
+`xdpyinfo` reports 2780x1264 instead of 2780x2780.
+
 ## 6.2.10 - 2026-11-21
 
 ### Added
