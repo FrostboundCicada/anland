@@ -13,7 +13,7 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
-## 6.3.0 - 2026-11-22
+## 6.2.13 - 2026-11-22
 
 ### Added
 
