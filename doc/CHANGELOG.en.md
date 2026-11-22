@@ -25,7 +25,18 @@ a small rectangle attached at a position. Promoted to a full-screen window it
 no longer sits next to the pointer and taps miss it. mini-wm now recognises O-R
 windows, reparents them into the toplevel under the pointer and keeps their
 absolute origin, so drawing and hit testing both happen at (100,100)-style
-coordinates. The owner cannot be guessed from the pointer. mini-wm used to ask only whichwindow sat under the pointer, so an owner's menu was painted into whateverother window the pointer happened to be over — in one measurement an OR-ownermenu was adopted into the Steam window. It now reads WM_TRANSIENT_FOR (and theEWMH _NET_WM_TRANSIENT_FOR that some toolkits set on override-redirect windowsinstead) and uses it when it resolves to a **mapped** root child; the pointerremains the fallback, and an unmapped parent is rejected because a popupadopted into one is invisible. Measured with the pointer over a second window:the journal still reports  andadopts into 0x2200001.
+coordinates.
+
+The owner cannot be guessed from the pointer. mini-wm used to ask only which
+window sat under the pointer, so an owner's menu was painted into whatever
+other window the pointer happened to be over — in one measurement an OR-owner
+menu was adopted into the Steam window. It now reads WM_TRANSIENT_FOR (and the
+EWMH _NET_WM_TRANSIENT_FOR that some toolkits set on override-redirect windows
+instead) and uses it when it resolves to a **mapped** root child; the pointer
+remains the fallback, and an unmapped parent is rejected because a popup
+adopted into one is invisible. Measured with the pointer over a second window:
+the journal still reports `O-R 0x2200003 is transient for 0x2200001` and adopts
+into 0x2200001.
 
 Verified with test_ord5: the journal shows
 `mini-wm: mapped 0x400001`, then
