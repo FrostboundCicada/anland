@@ -212,6 +212,10 @@ static void frame_adopt(Display* d, Window root, Window w) {
     s_n_frames++;
     if (s_n_skip < MAX_FRAMES) s_skip_unmap[s_n_skip++] = w;
     XReparentWindow(d, w, f, 0, 0);
+    /* The popup now lives under the frame, so its UnmapNotify/DestroyNotify
+     * go to the frame's parent (us) and not to root: without this selection
+     * a closed menu leaks an empty frame. */
+    XSelectInput(d, f, StructureNotifyMask | SubstructureNotifyMask);
     XMapWindow(d, w);        /* the reparent unmapped it */
     /* A client's own MapWindow is never turned into a MapRequest for itself
      * (X11 MapWindow: only "some other client" redirecting causes that), so the
@@ -248,15 +252,6 @@ static void frame_destroyed(Display* d, Window w) {
 }
 
 /* a popup that resizes itself must not get clipped by a stale frame */
-static void frame_resized(Display* d, Window w) {
-    Window f = frame_of_popup(w);
-    if (f == None) return;
-    XWindowAttributes wa;
-    if (!XGetWindowAttributes(d, w, &wa)) return;
-    if (wa.width > 0 && wa.height > 0)
-        XResizeWindow(d, f, (unsigned)wa.width, (unsigned)wa.height);
-}
-
 
 
 static void set_wm_state(Display* d, Window w, unsigned long state) {
@@ -464,9 +459,6 @@ int main(void) {
             }
             case UnmapNotify:
                 frame_unmapped(d, e.xunmap.window);
-                break;
-            case ConfigureNotify:
-                frame_resized(d, e.xconfigure.window);
                 break;
             case MapRequest: {
                 Window w = e.xmaprequest.window;
