@@ -23,6 +23,8 @@
     <string name="ime_mode_inset">Inset (surface shrinks above the keyboard, client reflows)</string>
     <string name="ime_mode_overlay">Overlay (keyboard floats over the window, surface unchanged)</string>
     <string name="zoom_tip">Display zoom (whole wayland window, applies immediately):</string>
+    <string name="auto_scale_tip">Auto zoom from the panel density (phone form factor: one logical pixel = one dp, overrides the manual zoom while on):</string>
+    <string name="auto_scale">Auto zoom from panel density</string>
     <string name="scale_mode_tip">Window scaling (when a fixed-size window is resized, applies immediately):</string>
     <string name="auto_attach_tip">Auto attach (daemon launches the host window automatically when a wayland window is created; off = the window waits for a binder SURFACE from its app):</string>
     <string name="auto_attach">Auto attach new windows</string>

@@ -23,6 +23,8 @@
     <string name="ime_mode_inset">让位（surface 缩到键盘上方, 客户端 reflow）</string>
     <string name="ime_mode_overlay">覆盖（键盘悬浮在窗口上层, surface 不变）</string>
     <string name="zoom_tip">显示缩放（wayland 窗口整体, 立即生效）:</string>
+    <string name="auto_scale_tip">按面板密度自动缩放（手机形态: 一个逻辑像素 = 一个 dp, 开启期间覆盖手动缩放）:</string>
+    <string name="auto_scale">按面板密度自动缩放</string>
     <string name="scale_mode_tip">窗口缩放方式（固定尺寸窗口被拉伸时, 立即生效）:</string>
     <string name="scale_mode_stretch">拉伸（填满窗口, 比例可能失真）</string>
     <string name="scale_mode_fit">等比缩放（完整显示, 居中留黑边）</string>

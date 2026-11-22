@@ -71,6 +71,28 @@ public class WlSettingsActivity extends Activity {
                         .apply());
         root.addView(imeRg);
 
+        /* ---- Auto zoom (daemon config auto_scale: derive the zoom from the
+         *      panel density so one logical pixel is one dp — a phone panel
+         *      then reads as a phone viewport. Overrides the manual zoom
+         *      below while on; applies immediately.) ---- */
+        android.widget.Space gap15 = new android.widget.Space(this);
+        gap15.setMinimumHeight(64);
+        root.addView(gap15);
+
+        TextView autoScaleTip = new TextView(this);
+        autoScaleTip.setText(R.string.auto_scale_tip);
+        root.addView(autoScaleTip);
+
+        android.widget.Switch autoScaleSw = new android.widget.Switch(this);
+        autoScaleSw.setText(R.string.auto_scale);
+        int gotAutoScale = WlBinder.configGet("auto_scale");
+        autoScaleSw.setChecked(gotAutoScale == 1);   /* daemon default off */
+        /* listener AFTER the initial state: opening the page must not fire a
+         * write back to the daemon */
+        autoScaleSw.setOnCheckedChangeListener((b, on) ->
+                WlBinder.configSet("auto_scale", on ? 1 : 0));
+        root.addView(autoScaleSw);
+
         /* ---- Display zoom (arbitrary ratio, daemon-side; #31) ---- */
         android.widget.Space gap2 = new android.widget.Space(this);
         gap2.setMinimumHeight(64);
