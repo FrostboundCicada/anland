@@ -81,27 +81,96 @@ static void output_bind(struct wl_client* client, void* data,
     pthread_rwlock_unlock(&g_srv.rwl);
 }
 
-/* Any thread (binder SURFACE/RESIZE). Grows the output mode to cover w×h
- * (physical px, per-axis max, never shrinks) and re-announces it to every
- * bound wl_output; a no-op when the window already fits. */
-void awl_output_grow(uint32_t w, uint32_t h) {
-    if (!g_srv.running || (w <= g_srv.info.width && h <= g_srv.info.height))
-        return;   /* racy pre-check only — the decision repeats under the lock */
-    pthread_rwlock_wrlock(&g_srv.rwl);
-    if (w <= g_srv.info.width && h <= g_srv.info.height) {
-        pthread_rwlock_unlock(&g_srv.rwl);
-        return;
-    }
-    if (w > g_srv.info.width) g_srv.info.width = w;
-    if (h > g_srv.info.height) g_srv.info.height = h;
+/* Live window sizes.  The mode has to cover the largest window (rootless
+ * Xwayland sizes its X screen from the output and clamps pointer/touch to
+ * it), but a mode that only ever ratchets is wrong too: one transient
+ * portrait window (1264x2780 on the way to 2780x1264) pinned the X screen at
+ * 2780x2780 for the rest of the session, and every fullscreen client then
+ * read a 1:1 screen.  Keying by window id makes a resize replace that
+ * window's own entry instead of ratcheting the maximum, so the mode falls
+ * back as soon as the largest window shrinks or closes. */
+#define AWL_OUTPUT_WINDOWS 64
+static struct { uint64_t id; uint32_t w, h; } g_out_wins[AWL_OUTPUT_WINDOWS];
+static int g_out_nwin;
+static uint32_t g_out_floor_w, g_out_floor_h;   /* boot mode: the minimum */
+
+/* caller holds rwl (wr) */
+static void output_publish_locked(uint32_t w, uint32_t h) {
+    if (w == g_srv.info.width && h == g_srv.info.height) return;
+    g_srv.info.width = w;
+    g_srv.info.height = h;
     struct awl_output_res* o;
     wl_list_for_each(o, &g_outputs, link) {
         output_send_state(o->res);
         wl_client_flush(wl_resource_get_client(o->res));
     }
+    LOGI("output mode %ux%u", w, h);
+}
+
+/* caller holds rwl (wr) */
+static void output_recompute_locked(void) {
+    uint32_t w = g_out_floor_w, h = g_out_floor_h;
+    int i;
+    for (i = 0; i < g_out_nwin; i++) {
+        if (g_out_wins[i].w > w) w = g_out_wins[i].w;
+        if (g_out_wins[i].h > h) h = g_out_wins[i].h;
+    }
+    output_publish_locked(w, h);
+}
+
+/* Any thread (binder SURFACE/RESIZE), once per window and again on every
+ * resize: record w×h as this window's demand and re-announce the per-axis
+ * maximum over all live windows (floored at the boot mode). */
+void awl_output_note(uint64_t id, uint32_t w, uint32_t h) {
+    if (!g_srv.running) return;
+    pthread_rwlock_wrlock(&g_srv.rwl);
+    int i;
+    for (i = 0; i < g_out_nwin; i++)
+        if (g_out_wins[i].id == id) break;
+    if (i == g_out_nwin) {
+        if (g_out_nwin == AWL_OUTPUT_WINDOWS) {
+            /* table full: keep the old grow-only rule so coverage is never
+             * lost (a mode that is too small breaks pointer reach, a mode
+             * that is too large only costs aspect) */
+            uint32_t nw = w > g_srv.info.width ? w : (uint32_t)g_srv.info.width;
+            uint32_t nh = h > g_srv.info.height ? h : (uint32_t)g_srv.info.height;
+            output_publish_locked(nw, nh);
+            pthread_rwlock_unlock(&g_srv.rwl);
+            return;
+        }
+        g_out_wins[i].id = id;
+        g_out_nwin++;
+    }
+    g_out_wins[i].w = w;
+    g_out_wins[i].h = h;
+    output_recompute_locked();
     pthread_rwlock_unlock(&g_srv.rwl);
-    LOGI("output grown to %ux%u (window %ux%u attached)",
-         g_srv.info.width, g_srv.info.height, w, h);
+}
+
+/* Window gone: drop its demand so a closed large window stops holding the
+ * mode up.  Unknown id (popups, already-forgotten) is a no-op. */
+void awl_output_forget(uint64_t id) {
+    if (!g_srv.running) return;
+    pthread_rwlock_wrlock(&g_srv.rwl);
+    int i;
+    for (i = 0; i < g_out_nwin; i++) {
+        if (g_out_wins[i].id != id) continue;
+        g_out_wins[i] = g_out_wins[--g_out_nwin];
+        output_recompute_locked();
+        break;
+    }
+    pthread_rwlock_unlock(&g_srv.rwl);
+}
+
+/* Grow-only convenience (see awl.h): never shrinks by itself — the next
+ * awl_output_note/awl_output_forget recomputes from the table. */
+void awl_output_grow(uint32_t w, uint32_t h) {
+    if (!g_srv.running) return;
+    pthread_rwlock_wrlock(&g_srv.rwl);
+    uint32_t nw = w > g_srv.info.width ? w : (uint32_t)g_srv.info.width;
+    uint32_t nh = h > g_srv.info.height ? h : (uint32_t)g_srv.info.height;
+    output_publish_locked(nw, nh);
+    pthread_rwlock_unlock(&g_srv.rwl);
 }
 
 /* ---------------- Client lifecycle ---------------- */
@@ -378,6 +447,8 @@ int awl_server_start(int listen_fd, const awl_display_info_t* info,
     g_srv.info = *info;
     if (g_srv.info.scale <= 0) g_srv.info.scale = 1;
     if (g_srv.info.refresh_hz <= 0) g_srv.info.refresh_hz = 60;
+    g_out_floor_w = g_srv.info.width;
+    g_out_floor_h = g_srv.info.height;
     g_srv.cbs = *cbs;
 
     g_srv.display = wl_display_create();

@@ -162,6 +162,14 @@ void awl_window_resize(uint64_t id, int32_t w, int32_t h);   /* xdg configure */
  * screen from the output and clamps pointer/touch to it, so an X toplevel
  * larger than the output had unreachable regions. Any thread. */
 void awl_output_grow(uint32_t w, uint32_t h);
+/* Same stream of w×h demands, but remembered per window: the mode becomes the
+ * per-axis maximum over every live window (floored at the boot mode), so it
+ * shrinks again when the largest window shrinks or closes.  Pass the Android
+ * window size; awl_window_resize's X counterpart adds the X-side size for the
+ * same id.  Call awl_output_forget from the destroy path so a closed window
+ * stops holding the mode up.  Any thread. */
+void awl_output_note(uint64_t id, uint32_t w, uint32_t h);
+void awl_output_forget(uint64_t id);
 /* Android window resized → the renderer's cached ANativeWindow size for this
  * window is stale: drop it, the next frame re-queries and renders at the new
  * size (the original full-screen path). Called from awl_window_resize; any
