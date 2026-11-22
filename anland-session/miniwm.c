@@ -152,6 +152,16 @@ static void popup_forget(Window w) {
         if (s_popups[i] == w) { s_popups[i] = s_popups[--s_n_popups]; return; }
 }
 
+/* A window we can paint a popup into: a real toplevel, mapped or not (a
+ * client often maps its menu before we have seen the owner's MapRequest, so
+ * requiring redir_known here would drop legitimate popups). */
+static int paint_target(Display* d, Window w) {
+    if (w == None || w == DefaultRootWindow(d)) return 0;
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(d, w, &wa)) return 0;
+    return !wa.override_redirect;
+}
+
 /* Root-child toplevel under the pointer: where the menu belongs. Walks up from
  * the input focus when the pointer is not over a managed window. */
 static Window popup_owner(Display* d, Window root, Window self) {
@@ -160,7 +170,7 @@ static Window popup_owner(Display* d, Window root, Window self) {
     unsigned mask;
     if (XQueryPointer(d, root, &rr, &child, &rx, &ry, &wx, &wy, &mask)
         && child != None && child != root && child != self
-        && redir_known(child))
+        && paint_target(d, child))
         return child;
     Window f = None;
     int rev;
@@ -171,7 +181,7 @@ static Window popup_owner(Display* d, Window root, Window self) {
         unsigned n = 0;
         if (!XQueryTree(d, cur, &r2, &p2, &kids, &n)) return None;
         if (kids) XFree(kids);
-        if (p2 == root) return (cur != self && redir_known(cur)) ? cur : None;
+        if (p2 == root) return (cur != self && paint_target(d, cur)) ? cur : None;
         cur = p2;
     }
     return None;
