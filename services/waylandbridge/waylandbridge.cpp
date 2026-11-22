@@ -135,7 +135,6 @@ static bool binder_plat_init(void) {
 #include <unistd.h>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <limits>
 #include <map>
@@ -196,15 +195,6 @@ enum {
                             * daemon's death will never EOF yours); (4)
                             * wl_display_connect_to_fd on the kept end. With
                             * config socket_listen=0 this is the only way in. */
-    AWL_T_APPS_LIST = 19, /* (container:string16) → count:i32 then count records
-                            * of (id:string16 name:string16 terminal:i32
-                            * nodisplay:i32); the container-side anland-apps
-                            * tool enumerates /usr/share/applications. With no
-                            * container name the configured default is used. */
-    AWL_T_APPS_RUN  = 20, /* (container:string16 appid:string16) → ok:i32;
-                            * launch that application inside the container.
-                            * appid is restricted to [a-z0-9-] and both values
-                            * are passed as argv, never through a shell. */
 };
 
 /* ---- window lifecycle events (daemon → subscriber apps, delivered over
@@ -679,90 +669,6 @@ static void shell_quote(const char* in, char* out, size_t n) {
     out[o++] = '\'';
     out[o] = 0;
 }
-
-/* ---------------- container app catalogue (anland-apps) ----------------
- * anland 6.x has no desktop environment, so nothing lists or starts the
- * applications installed inside the container. The container-side
- * /usr/local/bin/anland-apps owns that knowledge; the daemon only relays it to
- * the host APK over binder.
- *
- * Both calls take the container name and the app id as separate argv entries
- * (execv, never a shell string): a name that fails the whitelist below is
- * rejected before any process is created, so the binding cannot be used to run
- * arbitrary commands. */
-
-static bool apps_name_ok(const char* s) {
-    if (!s || !*s || strlen(s) > 64) return false;
-    for (const char* p = s; *p; p++) {
-        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-              (*p >= '0' && *p <= '9') || *p == '-' || *p == '_'))
-            return false;
-    }
-    return true;
-}
-
-static bool apps_id_ok(const char* s) {
-    if (!s || !*s || strlen(s) > 128) return false;
-    for (const char* p = s; *p; p++) {
-        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-'))
-            return false;
-    }
-    return true;
-}
-
-/* Run "droidspaces --name=<container> run -- /usr/local/bin/anland-apps <verb>
- * [appid]" and capture stdout. Returns the exit status, or -1 when the helper
- * could not even be started. */
-static int run_apps_tool(const std::string& container, const char* verb,
-                         const char* appid, std::string* out) {
-    out->clear();
-    int fds[2];
-    if (pipe(fds) != 0) return -1;
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(fds[0]); close(fds[1]);
-        return -1;
-    }
-    if (pid == 0) {
-        close(fds[0]);
-        dup2(fds[1], 1);
-        close(fds[1]);
-        int nul = open("/dev/null", O_WRONLY);
-        if (nul >= 0) { dup2(nul, 2); if (nul > 2) close(nul); }
-        std::string name_arg = "--name=" + container;
-        char appid_arg[160];
-        snprintf(appid_arg, sizeof(appid_arg), "%s", appid ? appid : "");
-        const char* argv[9];
-        int n = 0;
-        argv[n++] = "/data/local/Droidspaces/bin/droidspaces";
-        argv[n++] = name_arg.c_str();
-        argv[n++] = "run";
-        argv[n++] = "--";
-        argv[n++] = "/usr/local/bin/anland-apps";
-        argv[n++] = verb;
-        if (appid) argv[n++] = appid_arg;
-        argv[n] = nullptr;
-        execv(argv[0], const_cast<char* const*>(argv));
-        _exit(127);
-    }
-    close(fds[1]);
-    char buf[4096];
-    ssize_t r;
-    /* the catalogue is a few hundred lines at most; cap it so a misbehaving
-     * container cannot make the daemon allocate without bound */
-    while ((r = read(fds[0], buf, sizeof(buf))) > 0) {
-        if (out->size() + (size_t)r > (256u << 10)) break;
-        out->append(buf, (size_t)r);
-    }
-    close(fds[0]);
-    int st = 0;
-    if (waitpid(pid, &st, 0) < 0) return -1;
-    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
-}
-
-/* Default container name (config "apps_container", mirror in config.json).
- * Defined next to the transaction handlers, which sit after the config
- * globals; the catalogue helpers above must not touch them. */
 
 static void attach_activity(uint64_t id, const char* title) {
     char q[600];
@@ -1294,10 +1200,6 @@ static int g_cfg_init_w = 800;     /* initial-configure placeholder (#33; mirror
 static int g_cfg_init_h = 600;
 static int g_cfg_scale_mode = 0;   /* view mapping mode (#34; mirror of g_srv.scale_mode, AWL_SCALE_*) */
 static int g_cfg_auto_scale = 0;   /* 1 = derive zoom from the panel dpi (phone form factor), 0 = manual zoom */
-static std::string g_cfg_apps_container = "Debian";   /* container the app catalogue comes from */
-/* defined further down next to the catalogue helpers; the config loader above
- * them has to validate the name it reads from config.json */
-static bool apps_name_ok(const char* s);
 /* Panel extents + density, filled by query_display() before cfg_load_and_apply:
  * the source for auto_scale (the panel is the phone, the mode is what the
  * Activity reports — these two must not be confused). */
@@ -1381,13 +1283,11 @@ static void cfg_save_locked(void) {
                "  \"scale_mode\": %d,\n  \"xwayland_scale\": %d,\n"
                "  \"auto_attach\": %d,\n  \"sc_enabled\": %d,\n"
                "  \"auto_scale\": %d,\n"
-               "  \"apps_container\": \"%s\",\n"
                "  \"runtime_dir\": \"%s\",\n  \"socket_listen\": %d\n}\n",
             g_cfg_zoom, g_cfg_init_w, g_cfg_init_h, g_cfg_scale_mode,
             g_cfg_xwayland_scale.load(std::memory_order_relaxed) ? 1 : 0,
             g_cfg_auto_attach ? 1 : 0, g_cfg_sc.load(std::memory_order_relaxed) ? 1 : 0,
             g_cfg_auto_scale,
-            g_cfg_apps_container.c_str(),
             rt, sl);
     if (fclose(f) != 0)
         LOGE("config save flush: %s", strerror(errno));
@@ -1551,13 +1451,6 @@ static void cfg_load_and_apply(void) {
         LOGI("config: auto_scale=%s (applied at startup)", asc ? "true" : "false");
     } else if (asc != -1) {
         LOGE("config: auto_scale=%d out of range (0..1), ignored", asc);
-    }
-    char apps_ct[96];
-    if (cfg_parse_str(buf, "apps_container", apps_ct, sizeof(apps_ct)) == 0 &&
-        apps_name_ok(apps_ct)) {
-        std::lock_guard<std::mutex> lk(g_cfg_lock);
-        g_cfg_apps_container = apps_ct;
-        LOGI("config: apps_container=%s", apps_ct);
     }
     cfg_apply_scale();   /* auto_scale wins over the manual zoom mirror */
 }
@@ -2238,82 +2131,6 @@ static binder_status_t host_on_transact(AIBinder* binder, transaction_code_t cod
             AParcel_readInt32(in, &val) != STATUS_OK)
             return STATUS_BAD_VALUE;
         AParcel_writeInt32(out, cfg_set(key, val));
-        return STATUS_OK;
-    }
-    case AWL_T_APPS_LIST: {   /* container app catalogue → count + records */
-        std::string container;
-        if (AParcel_readString(in, &container, wl_str_alloc) != STATUS_OK)
-            return STATUS_BAD_VALUE;
-        if (container.empty()) {
-            std::lock_guard<std::mutex> lk(g_cfg_lock);
-            container = g_cfg_apps_container;
-        }
-        if (!apps_name_ok(container.c_str())) {
-            LOGE("apps list: invalid container name '%s'", container.c_str());
-            AParcel_writeInt32(out, -1);
-            return STATUS_OK;
-        }
-        std::string raw;
-        int rc = run_apps_tool(container, "list", nullptr, &raw);
-        if (rc != 0) {
-            LOGE("apps list: anland-apps exited %d (container=%s)", rc, container.c_str());
-            AParcel_writeInt32(out, -1);
-            return STATUS_OK;
-        }
-        /* one record per line: id \t name \t terminal \t nodisplay \t command */
-        std::vector<std::array<std::string, 4>> recs;
-        size_t pos = 0;
-        while (pos <= raw.size()) {
-            size_t eol = raw.find('\n', pos);
-            if (eol == std::string::npos) eol = raw.size();
-            std::string line = raw.substr(pos, eol - pos);
-            pos = eol + 1;
-            if (line.empty()) continue;
-            std::vector<std::string> f;
-            size_t s = 0;
-            while (true) {
-                size_t tab = line.find('\t', s);
-                if (tab == std::string::npos) { f.push_back(line.substr(s)); break; }
-                f.push_back(line.substr(s, tab - s));
-                s = tab + 1;
-            }
-            if (f.size() < 4) continue;
-            if (!apps_id_ok(f[0].c_str())) continue;
-            recs.push_back({f[0], f[1], f[2], f[3]});
-        }
-        AParcel_writeInt32(out, (int32_t)recs.size());
-        for (auto& r : recs) {
-            AParcel_writeString(out, r[0].c_str(), (int32_t)r[0].size());
-            AParcel_writeString(out, r[1].c_str(), (int32_t)r[1].size());
-            AParcel_writeInt32(out, atoi(r[2].c_str()) ? 1 : 0);
-            AParcel_writeInt32(out, atoi(r[3].c_str()) ? 1 : 0);
-        }
-        LOGI("apps list: %zu entries from container %s", recs.size(), container.c_str());
-        return STATUS_OK;
-    }
-    case AWL_T_APPS_RUN: {   /* launch one container application */
-        std::string container, appid;
-        if (AParcel_readString(in, &container, wl_str_alloc) != STATUS_OK ||
-            AParcel_readString(in, &appid, wl_str_alloc) != STATUS_OK)
-            return STATUS_BAD_VALUE;
-        if (container.empty()) {
-            std::lock_guard<std::mutex> lk(g_cfg_lock);
-            container = g_cfg_apps_container;
-        }
-        if (!apps_name_ok(container.c_str()) || !apps_id_ok(appid.c_str())) {
-            LOGE("apps run: rejected container='%s' appid='%s'",
-                 container.c_str(), appid.c_str());
-            AParcel_writeInt32(out, -1);
-            return STATUS_OK;
-        }
-        std::string ignored;
-        int rc = run_apps_tool(container, "run", appid.c_str(), &ignored);
-        if (rc != 0)
-            LOGE("apps run: anland-apps exited %d (container=%s appid=%s)",
-                 rc, container.c_str(), appid.c_str());
-        else
-            LOGI("apps run: launched %s in %s", appid.c_str(), container.c_str());
-        AParcel_writeInt32(out, rc == 0 ? 0 : -1);
         return STATUS_OK;
     }
     default:
