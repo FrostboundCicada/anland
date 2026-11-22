@@ -744,8 +744,10 @@ static void xwm_resize_window(uint64_t id, int32_t w, int32_t h) {
     if (!awl_xwayland_window_serial(id, &serial)) return;
     int32_t xw = xwm_scaled_dimension(w);
     int32_t xh = xwm_scaled_dimension(h);
-    if (xw != w || xh != h)
-        awl_output_grow((uint32_t)xw, (uint32_t)xh);
+    /* the X side can be larger than the Android window (zoom < 1): the X
+     * screen has to cover both, and this replaces this window's entry rather
+     * than ratcheting the maximum */
+    awl_output_note(id, (uint32_t)(xw > w ? xw : w), (uint32_t)(xh > h ? xh : h));
     char cmd[96];
     int n = snprintf(cmd, sizeof(cmd), "S %llu %d %d\n",
                      (unsigned long long)serial, xw, xh);
@@ -820,6 +822,7 @@ static void cb_window_created(void* user, uint64_t id, int32_t pref_w, int32_t p
 
 static void cb_window_destroyed(void* user, uint64_t id) {
     LOGI("window %llu destroyed", (unsigned long long)id);
+    awl_output_forget(id);   /* a closed large window must stop holding the mode up */
     /* the window still resolves here (callback fires before the logic layer
      * unlinks the surface) — snapshot the owner for the destroy event; a
      * lookup after the erase below would read (uid_t)-1 */
@@ -1740,7 +1743,7 @@ static binder_status_t host_on_transact(AIBinder* binder, transaction_code_t cod
         ime_reopen_on_attach(id);            /* input state kept alive: enabled during detach → reopen */
         capture_reopen_on_attach(id);        /* constraint still active (persistent) → re-capture */
         keep_on_reopen_on_attach(id);        /* idle inhibitor alive → re-set FLAG_KEEP_SCREEN_ON */
-        awl_output_grow((uint32_t)w, (uint32_t)h);   /* X screen must cover the X window before it is resized to us */
+        awl_output_note(id, (uint32_t)w, (uint32_t)h);   /* X screen must cover the X window before it is resized to us */
         awl_window_resize(id, w, h);         /* Android fully owns sizing (initial + subsequent) */
         xwm_resize_window(id, w, h);         /* Xwayland window: sync initial size to the X side */
         backend_request_render(id);          /* render a first frame */
@@ -1871,7 +1874,7 @@ static binder_status_t host_on_transact(AIBinder* binder, transaction_code_t cod
         AParcel_readInt32(in, &w);
         AParcel_readInt32(in, &h);
         if (!window_ok((uint64_t)id64)) { AParcel_writeInt32(out, -1); return STATUS_OK; }
-        awl_output_grow((uint32_t)w, (uint32_t)h);
+        awl_output_note((uint64_t)id64, (uint32_t)w, (uint32_t)h);
         awl_window_resize((uint64_t)id64, w, h);
         xwm_resize_window((uint64_t)id64, w, h);
         backend_request_render((uint64_t)id64);

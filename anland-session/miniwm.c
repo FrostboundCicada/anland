@@ -6,8 +6,10 @@
  * redirectDraw == Manual — this WM does XCompositeRedirectWindow(Manual) at
  * MapRequest (after redirect, SetWindowPixmap triggers ensure; already-
  * mapped windows can be adopted this way too). No reparenting: client
- * windows stay children of root, exactly one wl_surface per window; O-R
- * popup windows never hit MapRequest → they don't surface.
+ * windows stay children of root, exactly one wl_surface per window. O-R
+ * popup windows never hit MapRequest (they map themselves), so they are
+ * redirected from the root's SubstructureNotify MapNotify instead —
+ * without a redirect Xwayland never creates their surface.
  * Duties: SubstructureRedirect takes over MapRequest/ConfigureRequest
  * (pass-through) + WM_STATE + input focus (the minimal ICCCM set).
  *
@@ -86,6 +88,201 @@ static int on_x_error(Display* d, XErrorEvent* e) {
     fprintf(stderr, "mini-wm: x error opcode=%d minor=%d rid=0x%lx\n",
             e->request_code, e->minor_code, e->resourceid);
     return 0;
+}
+
+/* Redirected windows. XCompositeRedirectWindow twice on the same window is
+ * BadAccess, and a MapNotify follows every mapping — including the ones this
+ * WM performs in MapRequest and every remap of an O-R popup — so remember
+ * what was already redirected and forget it on destroy (ids get reused). */
+#define MAX_REDIR 256
+static Window s_redir[MAX_REDIR];
+static int s_n_redir = 0;
+
+static int redir_known(Window w) {
+    for (int i = 0; i < s_n_redir; i++)
+        if (s_redir[i] == w) return 1;
+    return 0;
+}
+
+static void redir_redirect(Display* d, Window w) {
+    if (w == None || redir_known(w)) return;
+    XCompositeRedirectWindow(d, w, CompositeRedirectManual);
+    if (s_n_redir < MAX_REDIR) s_redir[s_n_redir++] = w;
+}
+
+static void redir_forget(Window w) {
+    for (int i = 0; i < s_n_redir; i++)
+        if (s_redir[i] == w) {
+            s_redir[i] = s_redir[--s_n_redir];
+            return;
+        }
+}
+
+/* ---- O-R popup adoption -----------------------------------------------
+ * Rootless Xwayland (24.1) gives an override-redirect window a wl_surface and
+ * an association serial but never commits a buffer for it: an O-R window is
+ * not tracked for damage, so the awl daemon — which creates the Android window
+ * on the first commit — never shows it (observed: "surface N associated", then
+ * "surface N destroyed (mapped=0)"). Giving it a frame of its own fixes the
+ * pixels but not the UX: every Android window is a fullscreen task, so a menu
+ * would take over the screen and steal focus from the window it belongs to.
+ *
+ * Instead reparent the popup into the toplevel the pointer is over. The X
+ * server paints child windows into their parent's pixmap, so the menu lands
+ * inside the Android window that is already showing, at the right place, with
+ * no extra task and no focus change. Only root children are adopted: an O-R
+ * child of a managed window is already part of that window's pixmap. */
+#define MAX_POPUPS 64
+static Window s_popups[MAX_POPUPS];
+static int s_n_popups = 0;
+/* Reparenting a mapped window unmaps it for a moment. A client may read that
+ * echo as "my menu was dismissed", so the first UnmapNotify of a window we
+ * just adopted is dropped. */
+static Window s_skip_unmap[MAX_POPUPS];
+static int s_n_skip = 0;
+
+static int popup_known(Window w) {
+    for (int i = 0; i < s_n_popups; i++)
+        if (s_popups[i] == w) return 1;
+    return 0;
+}
+
+static void popup_forget(Window w) {
+    for (int i = 0; i < s_n_popups; i++)
+        if (s_popups[i] == w) { s_popups[i] = s_popups[--s_n_popups]; return; }
+}
+
+/* A window we can paint a popup into: a real toplevel, mapped or not (a
+ * client often maps its menu before we have seen the owner's MapRequest, so
+ * requiring redir_known here would drop legitimate popups). */
+static int paint_target(Display* d, Window w) {
+    if (w == None || w == DefaultRootWindow(d)) return 0;
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(d, w, &wa)) return 0;
+    return !wa.override_redirect;
+}
+
+/* Root-child toplevel a popup is transient for. Menus set WM_TRANSIENT_FOR
+ * (GTK, Qt and CEF all do) and that names the owner exactly; the pointer only
+ * names it while the pointer happens to still be over the owner, so a popup
+ * that outlives a pointer move was painted into whatever window the pointer
+ * reached instead (0x2200002 from an OR-owner toplevel landed inside the
+ * Steam window at 12:18:50 for exactly this reason). */
+static Window transient_target(Display* d, Window root, Window self) {
+    if (!d || root == None || self == None) return None;
+    static Atom net_transient = None;
+    if (net_transient == None) net_transient = XInternAtom(d, "_NET_WM_TRANSIENT_FOR", False);
+    Window t = None;
+    /* XGetTransientForHint answers the ICCCM WM_TRANSIENT_FOR; the EWMH atom
+     * is what some toolkits set on override-redirect windows instead */
+    if (!XGetTransientForHint(d, self, &t) || t == None) {
+        Atom type = None; int fmt = 0; unsigned long n = 0, after = 0;
+        unsigned char* data = NULL;
+        if (net_transient == None ||
+            XGetWindowProperty(d, self, net_transient, 0, 1, False, XA_WINDOW,
+                               &type, &fmt, &n, &after, &data) != Success)
+            return None;
+        if (data) {
+            if (fmt == 32 && n >= 1) t = (Window)((unsigned long*)data)[0];
+            XFree(data);
+        }
+    }
+    if (t == None || t == self) return None;
+    for (Window cur = t; cur != None && cur != root; ) {
+        Window r2, p2, *kids = NULL;
+        unsigned n = 0;
+        if (!XQueryTree(d, cur, &r2, &p2, &kids, &n)) return None;
+        if (kids) XFree(kids);
+        if (p2 == root) {
+            /* only a mapped parent keeps the adopted popup visible */
+            XWindowAttributes twa;
+            if (cur == self || !paint_target(d, cur)) return None;
+            if (!XGetWindowAttributes(d, cur, &twa) || twa.map_state == IsUnmapped) return None;
+            return cur;
+        }
+        cur = p2;
+    }
+    return None;
+}
+
+/* Root-child toplevel under the pointer: where the menu belongs. Walks up from
+ * the input focus when the pointer is not over a managed window. */
+static Window popup_owner(Display* d, Window root, Window self) {
+    Window t = transient_target(d, root, self);
+    if (t != None) {
+        fprintf(stderr, "mini-wm: O-R 0x%lx is transient for 0x%lx\n", self, t);
+        return t;
+    }
+    Window rr, child = None;
+    int rx, ry, wx, wy;
+    unsigned mask;
+    if (XQueryPointer(d, root, &rr, &child, &rx, &ry, &wx, &wy, &mask)
+        && child != None && child != root && child != self
+        && paint_target(d, child))
+        return child;
+    Window f = None;
+    int rev;
+    XGetInputFocus(d, &f, &rev);
+    if (f == None || f == PointerRoot || f == root) return None;
+    for (Window cur = f; cur != None && cur != root; ) {
+        Window r2, p2, *kids = NULL;
+        unsigned n = 0;
+        if (!XQueryTree(d, cur, &r2, &p2, &kids, &n)) return None;
+        if (kids) XFree(kids);
+        if (p2 == root) return (cur != self && paint_target(d, cur)) ? cur : None;
+        cur = p2;
+    }
+    return None;
+}
+
+/* The popup was painted before it was adopted, and Xwayland only exports the
+ * parent's pixmap on damage. Dirty one pixel with an Expose so the toolkit
+ * repaints: resizing instead trips "wl_display error 0: invalid object" and
+ * takes the whole session down. */
+static void popup_nudge(Display* d, Window w) {
+    XClearArea(d, w, 0, 0, 1, 1, True);
+    XFlush(d);
+}
+
+static void popup_adopt(Display* d, Window root, Window w) {
+    if (w == root || popup_known(w)) return;
+    XWindowAttributes wa;
+    if (!XGetWindowAttributes(d, w, &wa)) return;
+    if (!wa.override_redirect) return;   /* managed: MapRequest already took it */
+    Window rr, pr, *kids = NULL;
+    unsigned n = 0;
+    if (!XQueryTree(d, w, &rr, &pr, &kids, &n)) return;
+    if (kids) XFree(kids);
+    if (pr != root) return;              /* inside a managed window: painted there */
+    if (s_n_popups >= MAX_POPUPS) return;
+    Window owner = popup_owner(d, root, w);
+    if (owner == None) return;           /* nothing to paint it into */
+    int ox = 0, oy = 0;
+    Window dest = None;
+    if (!XTranslateCoordinates(d, root, owner, 0, 0, &ox, &oy, &dest)) return;
+    if (s_n_skip < MAX_POPUPS) s_skip_unmap[s_n_skip++] = w;
+    s_popups[s_n_popups++] = w;
+    XReparentWindow(d, w, owner, wa.x - ox, wa.y - oy);
+    XMapRaised(d, w);        /* the reparent unmapped it */
+    XRaiseWindow(d, owner);
+    popup_nudge(d, w);
+    fprintf(stderr, "mini-wm: adopted O-R 0x%lx into 0x%lx at %d,%d (%dx%d)\n",
+            w, owner, wa.x - ox, wa.y - oy, wa.width, wa.height);
+}
+
+static void popup_unmapped(Window w) {
+    for (int i = 0; i < s_n_skip; i++)
+        if (s_skip_unmap[i] == w) {
+            s_skip_unmap[i] = s_skip_unmap[--s_n_skip];
+            return;                       /* reparent echo, not a dismissal */
+        }
+    popup_forget(w);
+}
+
+static void popup_destroyed(Window w) {
+    popup_forget(w);
+    for (int i = 0; i < s_n_skip; i++)
+        if (s_skip_unmap[i] == w) { s_skip_unmap[i] = s_skip_unmap[--s_n_skip]; return; }
 }
 
 static void set_wm_state(Display* d, Window w, unsigned long state) {
@@ -229,8 +426,7 @@ int main(void) {
                 if (kids[i] != root &&
                     XGetWindowAttributes(d, kids[i], &wa) &&
                     wa.map_state == IsViewable && !wa.override_redirect) {
-                    XCompositeRedirectWindow(d, kids[i],
-                                             CompositeRedirectManual);
+                    redir_redirect(d, kids[i]);
                     set_wm_state(d, kids[i], NormalState);
                 }
             }
@@ -284,10 +480,21 @@ int main(void) {
             XEvent e;
             XNextEvent(d, &e);
             switch (e.type) {
+            case MapNotify: {
+                /* O-R popups (menus, tooltips, DnD icons) map themselves: no
+                 * MapRequest, and the surface Xwayland builds for them never
+                 * gets a committed buffer. Reparent them into the toplevel
+                 * under the pointer — see the O-R block above. */
+                popup_adopt(d, root, e.xmap.window);
+                break;
+            }
+            case UnmapNotify:
+                popup_unmapped(e.xunmap.window);
+                break;
             case MapRequest: {
                 Window w = e.xmaprequest.window;
                 XMoveWindow(d, w, 0, 0);   /* (0,0) pin, see the header (covers a CreateWindow position) */
-                XCompositeRedirectWindow(d, w, CompositeRedirectManual);
+                redir_redirect(d, w);
                 XMapWindow(d, w);
                 set_wm_state(d, w, NormalState);
                 XSetInputFocus(d, w, RevertToPointerRoot, CurrentTime);
@@ -327,6 +534,8 @@ int main(void) {
             }
             case DestroyNotify:
                 pair_forget_window(e.xdestroywindow.window);
+                redir_forget(e.xdestroywindow.window);
+                popup_destroyed(e.xdestroywindow.window);
                 break;
             default:
                 break;   /* Create/Unmap/Configure Notify etc.: Xwayland's own business */
