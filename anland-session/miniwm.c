@@ -6,8 +6,10 @@
  * redirectDraw == Manual — this WM does XCompositeRedirectWindow(Manual) at
  * MapRequest (after redirect, SetWindowPixmap triggers ensure; already-
  * mapped windows can be adopted this way too). No reparenting: client
- * windows stay children of root, exactly one wl_surface per window; O-R
- * popup windows never hit MapRequest → they don't surface.
+ * windows stay children of root, exactly one wl_surface per window. O-R
+ * popup windows never hit MapRequest (they map themselves), so they are
+ * redirected from the root's SubstructureNotify MapNotify instead —
+ * without a redirect Xwayland never creates their surface.
  * Duties: SubstructureRedirect takes over MapRequest/ConfigureRequest
  * (pass-through) + WM_STATE + input focus (the minimal ICCCM set).
  *
@@ -86,6 +88,34 @@ static int on_x_error(Display* d, XErrorEvent* e) {
     fprintf(stderr, "mini-wm: x error opcode=%d minor=%d rid=0x%lx\n",
             e->request_code, e->minor_code, e->resourceid);
     return 0;
+}
+
+/* Redirected windows. XCompositeRedirectWindow twice on the same window is
+ * BadAccess, and a MapNotify follows every mapping — including the ones this
+ * WM performs in MapRequest and every remap of an O-R popup — so remember
+ * what was already redirected and forget it on destroy (ids get reused). */
+#define MAX_REDIR 256
+static Window s_redir[MAX_REDIR];
+static int s_n_redir = 0;
+
+static int redir_known(Window w) {
+    for (int i = 0; i < s_n_redir; i++)
+        if (s_redir[i] == w) return 1;
+    return 0;
+}
+
+static void redir_redirect(Display* d, Window w) {
+    if (w == None || redir_known(w)) return;
+    XCompositeRedirectWindow(d, w, CompositeRedirectManual);
+    if (s_n_redir < MAX_REDIR) s_redir[s_n_redir++] = w;
+}
+
+static void redir_forget(Window w) {
+    for (int i = 0; i < s_n_redir; i++)
+        if (s_redir[i] == w) {
+            s_redir[i] = s_redir[--s_n_redir];
+            return;
+        }
 }
 
 static void set_wm_state(Display* d, Window w, unsigned long state) {
@@ -229,8 +259,7 @@ int main(void) {
                 if (kids[i] != root &&
                     XGetWindowAttributes(d, kids[i], &wa) &&
                     wa.map_state == IsViewable && !wa.override_redirect) {
-                    XCompositeRedirectWindow(d, kids[i],
-                                             CompositeRedirectManual);
+                    redir_redirect(d, kids[i]);
                     set_wm_state(d, kids[i], NormalState);
                 }
             }
@@ -284,10 +313,24 @@ int main(void) {
             XEvent e;
             XNextEvent(d, &e);
             switch (e.type) {
+            case MapNotify: {
+                /* O-R popups (menus, tooltips, DnD icons) map themselves: no
+                 * MapRequest, and Xwayland only builds a wl_surface once the
+                 * window is redirected — redirect here so they surface at all. */
+                Window w = e.xmap.window;
+                XWindowAttributes wa;
+                if (w == root || !XGetWindowAttributes(d, w, &wa)) break;
+                if (!wa.override_redirect) break;   /* managed: MapRequest did it */
+                redir_redirect(d, w);
+                XRaiseWindow(d, w);   /* a popup belongs above its owner */
+                fprintf(stderr, "mini-wm: surfaced O-R 0x%lx (%dx%d)\n",
+                        w, wa.width, wa.height);
+                break;
+            }
             case MapRequest: {
                 Window w = e.xmaprequest.window;
                 XMoveWindow(d, w, 0, 0);   /* (0,0) pin, see the header (covers a CreateWindow position) */
-                XCompositeRedirectWindow(d, w, CompositeRedirectManual);
+                redir_redirect(d, w);
                 XMapWindow(d, w);
                 set_wm_state(d, w, NormalState);
                 XSetInputFocus(d, w, RevertToPointerRoot, CurrentTime);
@@ -327,6 +370,7 @@ int main(void) {
             }
             case DestroyNotify:
                 pair_forget_window(e.xdestroywindow.window);
+                redir_forget(e.xdestroywindow.window);
                 break;
             default:
                 break;   /* Create/Unmap/Configure Notify etc.: Xwayland's own business */
