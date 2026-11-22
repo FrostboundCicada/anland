@@ -94,6 +94,22 @@ default `1`; applied when a window attaches):
   eglSwapBuffers. Surface movement is smooth, at the price of a GPU composite
   every frame. Best for scrolling content — web browsing.
 
+**SC needs a forgeable gralloc blob, which is not universal.** Zero-copy scanout
+means wrapping the client's dma-buf in an `AHardwareBuffer`, and that requires
+forging the vendor's private handle blob. The daemon calibrates the layout at
+runtime by allocating two buffers of known geometry and diffing their blobs; if
+the driver stores neither the exact byte size nor a byte stride — as Adreno
+(A16, SM7675) and every MTK driver do — calibration fails with
+`calib failed … blob offsets not calibrated` and every import is refused, so no
+window renders at all. Take the EGL backend on those devices:
+
+```json
+{ "sc_enabled": 0 }
+```
+
+`AWL_NO_SCANOUT=1` in the daemon environment refuses the scanout path outright
+and has the same effect when the config cannot be changed.
+
 ## Requirements
 
 - **Android 14 (API 34) or newer.** The daemon calls

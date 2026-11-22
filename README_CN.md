@@ -84,6 +84,19 @@ flowchart LR
   采样进一个缓冲区，经 eglSwapBuffers 呈现。surface 移动平滑，代价是每帧一次 GPU
   合成。适合滚动内容——网页浏览。
 
+**SC 需要能伪造的 gralloc blob，而这不是所有平台都成立。** 零拷贝上屏意味着把客户端的
+dma-buf 包装成 `AHardwareBuffer`，也就必须伪造驱动私有的 handle blob。守护进程在运行
+时标定该布局：分配两个已知几何的缓冲，diff 它们的 blob；如果驱动既不存精确字节长度、
+也不存字节 stride——Adreno（A16、SM7675）和所有 MTK 驱动都是这样——标定就失败，报
+`calib failed … blob offsets not calibrated`，之后每一次导入都被拒绝，**一个窗口都渲染
+不出来**。这些设备上改用 EGL 后端：
+
+```json
+{ "sc_enabled": 0 }
+```
+
+守护进程环境里加 `AWL_NO_SCANOUT=1` 会直接放弃上屏路径，配置改不了时效果相同。
+
 ## 环境要求
 
 - **Android 14（API 34）或更高。** 守护进程调用 `ANativeWindow_readFromParcel`
