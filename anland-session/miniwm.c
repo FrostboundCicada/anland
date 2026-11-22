@@ -162,9 +162,57 @@ static int paint_target(Display* d, Window w) {
     return !wa.override_redirect;
 }
 
+/* Root-child toplevel a popup is transient for. Menus set WM_TRANSIENT_FOR
+ * (GTK, Qt and CEF all do) and that names the owner exactly; the pointer only
+ * names it while the pointer happens to still be over the owner, so a popup
+ * that outlives a pointer move was painted into whatever window the pointer
+ * reached instead (0x2200002 from an OR-owner toplevel landed inside the
+ * Steam window at 12:18:50 for exactly this reason). */
+static Window transient_target(Display* d, Window root, Window self) {
+    if (!d || root == None || self == None) return None;
+    static Atom net_transient = None;
+    if (net_transient == None) net_transient = XInternAtom(d, "_NET_WM_TRANSIENT_FOR", False);
+    Window t = None;
+    /* XGetTransientForHint answers the ICCCM WM_TRANSIENT_FOR; the EWMH atom
+     * is what some toolkits set on override-redirect windows instead */
+    if (!XGetTransientForHint(d, self, &t) || t == None) {
+        Atom type = None; int fmt = 0; unsigned long n = 0, after = 0;
+        unsigned char* data = NULL;
+        if (net_transient == None ||
+            XGetWindowProperty(d, self, net_transient, 0, 1, False, XA_WINDOW,
+                               &type, &fmt, &n, &after, &data) != Success)
+            return None;
+        if (data) {
+            if (fmt == 32 && n >= 1) t = (Window)((unsigned long*)data)[0];
+            XFree(data);
+        }
+    }
+    if (t == None || t == self) return None;
+    for (Window cur = t; cur != None && cur != root; ) {
+        Window r2, p2, *kids = NULL;
+        unsigned n = 0;
+        if (!XQueryTree(d, cur, &r2, &p2, &kids, &n)) return None;
+        if (kids) XFree(kids);
+        if (p2 == root) {
+            /* only a mapped parent keeps the adopted popup visible */
+            XWindowAttributes twa;
+            if (cur == self || !paint_target(d, cur)) return None;
+            if (!XGetWindowAttributes(d, cur, &twa) || twa.map_state == IsUnmapped) return None;
+            return cur;
+        }
+        cur = p2;
+    }
+    return None;
+}
+
 /* Root-child toplevel under the pointer: where the menu belongs. Walks up from
  * the input focus when the pointer is not over a managed window. */
 static Window popup_owner(Display* d, Window root, Window self) {
+    Window t = transient_target(d, root, self);
+    if (t != None) {
+        fprintf(stderr, "mini-wm: O-R 0x%lx is transient for 0x%lx\n", self, t);
+        return t;
+    }
     Window rr, child = None;
     int rx, ry, wx, wy;
     unsigned mask;
