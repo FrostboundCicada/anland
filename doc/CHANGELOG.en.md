@@ -13,6 +13,24 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
+## 6.2.12 - 2026-11-22
+
+### Fixed
+
+**The square intermediate was still being published.** v6.2.11 made the mode come
+back down with its window, but it did not skip the intermediate: the log still read
+`1280x720 -> 1280x2780 -> 2780x1264`, and the square really was published as a
+RandR mode, so a client starting inside that window read a 1:1 screen. It lasted
+117 ms here. Every mode change now goes through one queue: a target is published
+only if no newer demand replaced it for `AWL_OUTPUT_SETTLE_MS` (250 ms), and a
+replaced target is dropped. Deferring growth alone is not enough — the portrait
+and the landscape demand of one window are 117 ms apart, and the landscape that
+follows is a *shrink* relative to the square, so it would publish at once and
+leave the square behind. Verified after a daemon restart: opening the Steam login
+page produced no output-mode line at all (the mode stayed at its 2780x1264 boot
+value), `xdpyinfo` still reports 2780x1264, and the login page and its QR code
+render uncropped.
+
 ## 6.2.11 - 2026-11-22
 
 ### Fixed
