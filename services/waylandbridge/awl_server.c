@@ -82,18 +82,24 @@ static void output_bind(struct wl_client* client, void* data,
     pthread_rwlock_unlock(&g_srv.rwl);
 }
 
-/* Live window sizes.  The mode has to cover the largest window (rootless
+/* Live window sizes.  The mode has to cover the window it serves (rootless
  * Xwayland sizes its X screen from the output and clamps pointer/touch to
- * it), but a mode that only ever ratchets is wrong too: one transient
- * portrait window (1264x2780 on the way to 2780x1264) pinned the X screen at
- * 2780x2780 for the rest of the session, and every fullscreen client then
- * read a 1:1 screen.  Keying by window id makes a resize replace that
- * window's own entry instead of ratcheting the maximum, so the mode falls
- * back as soon as the largest window shrinks or closes. */
+ * it), and every window here is a fullscreen Android Activity, so all live
+ * windows report the same display size — EXCEPT the stale ones that did not
+ * report again after a rotation.  Taking a per-axis maximum over that set
+ * mixes the old orientation into the new one: a portrait window (1264x2780)
+ * plus its landscape predecessor (2780x1264) yields 2780x2780, i.e. a square
+ * X screen that no client can lay out for, and it stays until the stale
+ * window happens to report.  The latest demand wins instead: it is by
+ * construction the size of the window the user is looking at, and the 250 ms
+ * settle below already absorbs the transient attach sizes.  The table is
+ * still maintained so awl_output_forget can drop a closed window without
+ * disturbing the live demand. */
 #define AWL_OUTPUT_WINDOWS 64
 static struct { uint64_t id; uint32_t w, h; } g_out_wins[AWL_OUTPUT_WINDOWS];
 static int g_out_nwin;
-static uint32_t g_out_floor_w, g_out_floor_h;   /* boot mode: the minimum */
+static uint32_t g_out_floor_w, g_out_floor_h;   /* boot mode: mode with no window */
+static uint32_t g_out_last_w, g_out_last_h;     /* most recent demand: the live mode */
 
 static void output_publish_locked(uint32_t w, uint32_t h);
 
@@ -185,18 +191,18 @@ static void output_request_locked(uint32_t w, uint32_t h) {
 
 /* caller holds rwl (wr) */
 static void output_recompute_locked(void) {
-    uint32_t w = g_out_floor_w, h = g_out_floor_h;
-    int i;
-    for (i = 0; i < g_out_nwin; i++) {
-        if (g_out_wins[i].w > w) w = g_out_wins[i].w;
-        if (g_out_wins[i].h > h) h = g_out_wins[i].h;
+    if (g_out_nwin == 0) {
+        /* no window left: fall back to the boot mode (still the panel size) */
+        output_request_locked(g_out_floor_w, g_out_floor_h);
+        return;
     }
-    output_request_locked(w, h);
+    /* latest demand wins — see the table comment above */
+    output_request_locked(g_out_last_w, g_out_last_h);
 }
 
 /* Any thread (binder SURFACE/RESIZE), once per window and again on every
- * resize: record w×h as this window's demand and re-announce the per-axis
- * maximum over all live windows (floored at the boot mode). */
+ * resize: record w×h as this window's demand and announce the most recent
+ * demand as the mode. */
 void awl_output_note(uint64_t id, uint32_t w, uint32_t h) {
     if (!g_srv.running) return;
     pthread_rwlock_wrlock(&g_srv.rwl);
@@ -205,12 +211,12 @@ void awl_output_note(uint64_t id, uint32_t w, uint32_t h) {
         if (g_out_wins[i].id == id) break;
     if (i == g_out_nwin) {
         if (g_out_nwin == AWL_OUTPUT_WINDOWS) {
-            /* table full: keep the old grow-only rule so coverage is never
-             * lost (a mode that is too small breaks pointer reach, a mode
-             * that is too large only costs aspect) */
-            uint32_t nw = w > g_srv.info.width ? w : (uint32_t)g_srv.info.width;
-            uint32_t nh = h > g_srv.info.height ? h : (uint32_t)g_srv.info.height;
-            output_request_locked(nw, nh);
+            /* table full: the mode is the latest demand anyway, so dropping
+             * the bookkeeping entry loses nothing (forget then becomes a
+             * no-op for this window) */
+            g_out_last_w = w;
+            g_out_last_h = h;
+            output_recompute_locked();
             pthread_rwlock_unlock(&g_srv.rwl);
             return;
         }
@@ -219,6 +225,8 @@ void awl_output_note(uint64_t id, uint32_t w, uint32_t h) {
     }
     g_out_wins[i].w = w;
     g_out_wins[i].h = h;
+    g_out_last_w = w;
+    g_out_last_h = h;
     output_recompute_locked();
     pthread_rwlock_unlock(&g_srv.rwl);
 }
@@ -525,6 +533,8 @@ int awl_server_start(int listen_fd, const awl_display_info_t* info,
     if (g_srv.info.refresh_hz <= 0) g_srv.info.refresh_hz = 60;
     g_out_floor_w = g_srv.info.width;
     g_out_floor_h = g_srv.info.height;
+    g_out_last_w = g_out_floor_w;
+    g_out_last_h = g_out_floor_h;
     g_srv.cbs = *cbs;
 
     g_srv.display = wl_display_create();
