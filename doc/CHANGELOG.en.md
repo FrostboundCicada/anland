@@ -13,6 +13,39 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
+## 6.3.0 - 2026-11-22
+
+### Added
+
+**Auto zoom from the panel density (phone form factor).** The phone panel is
+already a phone: 1264x2780 @ 560dpi works out to 361dp wide, exactly a
+mainstream phone viewport; a desktop client only gets laid out like a phone app
+when one X logical pixel is one dp. New daemon config key `auto_scale`: when
+on, the zoom is derived as `dpi / 1.6` (350% at 560dpi), applied at startup and
+over CFG_SET, with a matching switch on the settings page. The zoom domain
+widens from 50..300 to 50..500 - without it the derived 350% clamped to the old
+ceiling and the X window sat at 421x927 instead of 361x794. `query_display`
+now keeps the panel's physical size separate from a `wm size` override: a
+virtual resolution still decides the boot mode but must not re-pin the derived
+scale. Verified: with auto_scale on and the session restarted, the Steam login
+window went from 2780x1264 to 361x794 (1264x2780 / 3.5), matching the panel's
+361dp width to the pixel.
+
+### Fixed
+
+**Portrait finally works: the output mode follows the latest window demand.**
+The mode used to be the per-axis maximum over every live window, which mixes a
+stale pre-rotation entry into the new orientation: a portrait window
+(1264x2780) plus its landscape predecessor (2780x1264) yields a 2780x2780
+square X screen no client can lay out for, and the square stays until the
+stale window happens to report again. v6.2.12's 250 ms settle only removed the
+*transient* square; the steady-state per-axis maximum still mixed axes. The
+mode is now the most recent demand - by construction the size of the window
+the user is looking at - while the settle keeps absorbing transient attach
+sizes. Verified: with orientation set to portrait and the Steam window
+rebuilt, `xdpyinfo` reports 1264x2780 and the login window fills it; flipping
+between orientations stays 2780x1264 <-> 1264x2780 with no square intermediate.
+
 ## 6.2.12 - 2026-11-22
 
 ### Added
