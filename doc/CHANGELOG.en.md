@@ -15,6 +15,21 @@ content is archived below.
 
 ## 6.2.12 - 2026-11-22
 
+### Added
+
+**A new window no longer lands behind the one already in front.** anland 6 gives
+every X toplevel its own AwlWindowActivity task, and Android keeps a single one
+visible at a time: a task created while another holds focus starts behind it with
+visible=false. That is exactly why a game started from Steam's Play button left
+the screen showing Steam - the game process was alive and its X window mapped,
+but its task sat in the background and nothing changed on the display. The module
+now ships anland-focus-new.sh, which polls the activity stack and fronts every
+task that appears after startup with `am task focus` - what a desktop window
+manager does when a toplevel maps (raise + focus). It does not judge window
+content: dialogs and game windows both want the front. Verified with Steam in
+front: a second X client showed up as `anland-focus-new: task 4133 fronted`
+within 2 s and filled the screen.
+
 ### Fixed
 
 **The square intermediate was still being published.** v6.2.11 made the mode come
