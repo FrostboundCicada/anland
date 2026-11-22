@@ -1199,6 +1199,12 @@ static int g_cfg_zoom = 100;       /* persisted mirror (real state lives in the 
 static int g_cfg_init_w = 800;     /* initial-configure placeholder (#33; mirror of g_srv.init_conf_*) */
 static int g_cfg_init_h = 600;
 static int g_cfg_scale_mode = 0;   /* view mapping mode (#34; mirror of g_srv.scale_mode, AWL_SCALE_*) */
+static int g_cfg_auto_scale = 0;   /* 1 = derive zoom from the panel dpi (phone form factor), 0 = manual zoom */
+/* Panel extents + density, filled by query_display() before cfg_load_and_apply:
+ * the source for auto_scale (the panel is the phone, the mode is what the
+ * Activity reports — these two must not be confused). */
+static uint32_t g_panel_long = 0, g_panel_short = 0;
+static int g_panel_dpi = 0;
 static char g_sock_dir[256] = "/data/local/tmp/awl";   /* runtime_dir (startup-loaded; see above) */
 static bool g_sock_listen = true;                      /* socket_listen (same) */
 /* runtime_dir for the mini-wm control socket (xwm_send_cmd): written once in
@@ -1207,13 +1213,14 @@ static const char* cfg_runtime_dir(void) { return g_sock_dir; }
 
 /* known config keys → valid domain (under g_cfg_lock); unknown keys rejected */
 static bool cfg_domain(const std::string& key, int* lo, int* hi) {
-    if (key == "zoom") { *lo = 50; *hi = 300; return true; }
+    if (key == "zoom") { *lo = 50; *hi = 500; return true; }
     if (key == "init_w") { *lo = 100; *hi = 7680; return true; }
     if (key == "init_h") { *lo = 100; *hi = 4320; return true; }
     if (key == "scale_mode") { *lo = 0; *hi = 2; return true; }
     if (key == "xwayland_scale") { *lo = 0; *hi = 1; return true; }
     if (key == "auto_attach") { *lo = 0; *hi = 1; return true; }
     if (key == "sc_enabled") { *lo = 0; *hi = 1; return true; }
+    if (key == "auto_scale") { *lo = 0; *hi = 1; return true; }
     return false;
 }
 
@@ -1275,10 +1282,12 @@ static void cfg_save_locked(void) {
     fprintf(f, "{\n  \"zoom\": %d,\n  \"init_w\": %d,\n  \"init_h\": %d,\n"
                "  \"scale_mode\": %d,\n  \"xwayland_scale\": %d,\n"
                "  \"auto_attach\": %d,\n  \"sc_enabled\": %d,\n"
+               "  \"auto_scale\": %d,\n"
                "  \"runtime_dir\": \"%s\",\n  \"socket_listen\": %d\n}\n",
             g_cfg_zoom, g_cfg_init_w, g_cfg_init_h, g_cfg_scale_mode,
             g_cfg_xwayland_scale.load(std::memory_order_relaxed) ? 1 : 0,
             g_cfg_auto_attach ? 1 : 0, g_cfg_sc.load(std::memory_order_relaxed) ? 1 : 0,
+            g_cfg_auto_scale,
             rt, sl);
     if (fclose(f) != 0)
         LOGE("config save flush: %s", strerror(errno));
@@ -1315,24 +1324,69 @@ static void cfg_load_sock_cfg(void) {
     }
 }
 
+/* ---- auto scale (phone form factor) ------------------------------------
+ * The panel is a phone: 1264x2780 at dpi 560 is 361 dp wide, i.e. exactly a
+ * phone viewport.  A desktop client only looks like a phone app when one X
+ * logical pixel is one Android dp, so derive the zoom that maps them 1:1:
+ *
+ *     logical = physical * 100 / zoom      dp = physical * 160 / dpi
+ *     logical == dp   →   zoom = dpi / 1.6
+ *
+ * Without a usable density, fall back to the CSS phone viewport width (411):
+ *     zoom = panel_short * 100 / 411
+ *
+ * Clamped to the zoom domain; 100 (no scaling) when neither input is usable.
+ * Wayland clients consume this through fractional-scale-v1 (crisp at any
+ * value); X11 clients get a scaled buffer (xwm_scaled_dimension), so at
+ * 300 %+ their text is upscaled — prefer Wayland-native apps on a phone. */
+static int auto_scale_pct(void) {
+    if (g_panel_dpi >= 120 && g_panel_dpi <= 1000) {
+        int pct = (int)lround((double)g_panel_dpi / 1.6);
+        if (pct >= 50 && pct <= 500) return pct;
+    }
+    if (g_panel_short >= 200) {
+        int pct = (int)lround((double)g_panel_short * 100.0 / 411.0);
+        if (pct < 50) pct = 50;
+        if (pct > 500) pct = 500;
+        return pct;
+    }
+    return 100;
+}
+
+/* Apply the zoom policy: auto_scale wins over the persisted manual value
+ * (which stays in config.json as the user's override, untouched). */
+static void cfg_apply_scale(void) {
+    int auto_on, manual;
+    {
+        std::lock_guard<std::mutex> lk(g_cfg_lock);
+        auto_on = g_cfg_auto_scale;
+        manual = g_cfg_zoom;
+    }
+    int pct = auto_on ? auto_scale_pct() : manual;
+    awl_display_set_zoom(pct);
+    if (auto_on)
+        LOGI("config: auto_scale → zoom=%d%% (panel %ux%u dpi=%d, logical %upx wide)",
+             pct, g_panel_long, g_panel_short, g_panel_dpi,
+             pct > 0 ? (unsigned)((double)g_panel_short * 100.0 / pct) : 0u);
+    else
+        LOGI("config: zoom=%d%% (manual)", pct);
+}
+
 /* startup load + apply (after awl_server_start; no windows at startup →
  * just set the values; each new window's first configure already uses them) */
 static void cfg_load_and_apply(void) {
     FILE* f = fopen(AWL_CFG_PATH, "r");
-    if (!f) return;   /* no config file → defaults (zoom 100%, 800x600) */
     char buf[512] = "";
-    fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
+    if (f) {
+        fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+    }   /* no config file → all keys absent → defaults (zoom 100%, 800x600) */
     int z = cfg_parse_int(buf, "zoom");
-    if (z >= 50 && z <= 300) {
-        {
-            std::lock_guard<std::mutex> lk(g_cfg_lock);
-            g_cfg_zoom = z;
-        }
-        awl_display_set_zoom(z);
-        LOGI("config: zoom=%d%% (applied at startup)", z);
+    if (z >= 50 && z <= 500) {
+        std::lock_guard<std::mutex> lk(g_cfg_lock);
+        g_cfg_zoom = z;   /* mirror only — cfg_apply_scale() decides below */
     } else if (z != -1) {
-        LOGE("config: zoom=%d out of range (50..300), ignored", z);
+        LOGE("config: zoom=%d out of range (50..500), ignored", z);
     }
     int iw = cfg_parse_int(buf, "init_w");
     int ih = cfg_parse_int(buf, "init_h");
@@ -1388,6 +1442,17 @@ static void cfg_load_and_apply(void) {
     } else if (sc != -1) {
         LOGE("config: sc_enabled=%d out of range (0..1), ignored", sc);
     }
+    int asc = cfg_parse_int(buf, "auto_scale");
+    if (asc == 0 || asc == 1) {
+        {
+            std::lock_guard<std::mutex> lk(g_cfg_lock);
+            g_cfg_auto_scale = asc;
+        }
+        LOGI("config: auto_scale=%s (applied at startup)", asc ? "true" : "false");
+    } else if (asc != -1) {
+        LOGE("config: auto_scale=%d out of range (0..1), ignored", asc);
+    }
+    cfg_apply_scale();   /* auto_scale wins over the manual zoom mirror */
 }
 
 /* set: apply → persist (apply first, write second; a write failure only warns — the live value stays in effect) */
@@ -1455,6 +1520,14 @@ static int cfg_set(const std::string& key, int32_t val) {
             cfg_save_locked();
         }
         LOGI("config set sc_enabled=%d (new attaches + persisted)", val);
+    } else if (key == "auto_scale") {
+        {
+            std::lock_guard<std::mutex> lk(g_cfg_lock);
+            g_cfg_auto_scale = val != 0;
+            cfg_save_locked();
+        }
+        cfg_apply_scale();   /* takes g_cfg_lock itself → call unlocked */
+        LOGI("config set auto_scale=%d (applied + persisted)", val ? 1 : 0);
     }
     return 0;
 }
@@ -2070,6 +2143,12 @@ static binder_status_t host_on_transact(AIBinder* binder, transaction_code_t cod
 static bool query_display(awl_display_info_t* info) {
     memset(info, 0, sizeof(*info));
     info->width = 1280; info->height = 720; info->refresh_hz = 60; info->dpi = 420;
+    /* Two different sizes live in `wm size`: the PANEL (Physical size — the
+     * phone's real extent, the only sane base for auto_scale) and the current
+     * override (Override size, i.e. an explicitly set virtual resolution).  A
+     * virtual resolution still decides the boot mode, but it must not skew the
+     * derived zoom, otherwise one `wm size WxH` re-pins the scale forever. */
+    uint32_t phys_w = 0, phys_h = 0;
     FILE* p = popen("/system/bin/wm size 2>/dev/null", "r");
     if (p) {
         char buf[256];
@@ -2077,16 +2156,23 @@ static bool query_display(awl_display_info_t* info) {
         while (fgets(buf, sizeof(buf), p)) {
             unsigned int w, h;
             if (sscanf(buf, " Override size: %ux%u", &w, &h) == 2) { ow = w; oh = h; }
-            else if (!ow && sscanf(buf, " Physical size: %ux%u", &w, &h) == 2) { ow = w; oh = h; }
+            else if (!phys_w && sscanf(buf, " Physical size: %ux%u", &w, &h) == 2) { phys_w = w; phys_h = h; }
         }
         pclose(p);
         if (ow) { info->width = ow; info->height = oh; }
+        else if (phys_w) { info->width = phys_w; info->height = phys_h; }
     }
     char prop[92] = "";
     __system_property_get("ro.sf.lcd_density", prop);
     if (prop[0]) info->dpi = atoi(prop);
     info->scale = 1;
-    LOGI("display %ux%u dpi=%d", info->width, info->height, info->dpi);
+    uint32_t pw = phys_w ? phys_w : info->width;
+    uint32_t ph = phys_h ? phys_h : info->height;
+    g_panel_long  = pw > ph ? pw : ph;
+    g_panel_short = pw > ph ? ph : pw;
+    g_panel_dpi   = info->dpi;
+    LOGI("display %ux%u dpi=%d (panel %ux%u)", info->width, info->height, info->dpi,
+         g_panel_long, g_panel_short);
     return true;
 }
 

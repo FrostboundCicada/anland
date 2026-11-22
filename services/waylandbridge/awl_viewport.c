@@ -459,16 +459,19 @@ void awl_viewport_setup(void) {
 }
 
 /* ---------------- zoom change (daemon T_ZOOM → here; any thread) ----------------
- * pct = 100 × Z (integer 50..300). Applied dynamically:
+ * pct = 100 × Z (integer 50..500). Applied dynamically:
  *   1) broadcast preferred_scale = pct×120/100 to all zwp_fractional_scale_v1
  *      objects;
  *   2) re-configure all toplevels with the remembered Android window size
  *      (phys×100/pct)
  * After receiving, the client (chrome) re-lays out buffer + viewport at the
- * new ratio; newly committed frames follow naturally. */
+ * new ratio; newly committed frames follow naturally.
+ * Upper bound 500: auto_scale derives zoom = dpi/1.6 from the panel
+ * (a 560 dpi phone panel needs 350%), and fractional-scale carries it exactly
+ * as preferred_scale = 420/120. */
 void awl_display_set_zoom(int pct) {
     if (pct < 50) pct = 50;
-    if (pct > 300) pct = 300;
+    if (pct > 500) pct = 500;
     if (pct == g_srv.zoom_pct) return;
     g_srv.zoom_pct = pct;
     LOGI("zoom → %d%% (preferred_scale=%u, effective Z=%.4f)", pct,

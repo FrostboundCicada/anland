@@ -85,10 +85,10 @@ public class WlSettingsActivity extends Activity {
         root.addView(zoomVal);
 
         int got = WlBinder.configGet("zoom");
-        final int[] cur = {(got < 50 || got > 300) ? 100 : got};   /* daemon down / unknown → 100 */
+        final int[] cur = {(got < 50 || got > 500) ? 100 : got};   /* daemon down / unknown → 100 */
 
         android.widget.SeekBar seek = new android.widget.SeekBar(this);
-        seek.setMax(250);          /* progress = pct - 50 → any value in 50..300 */
+        seek.setMax(450);          /* progress = pct - 50 → any value in 50..500 */
         seek.setProgress(cur[0] - 50);
         root.addView(seek);
 
