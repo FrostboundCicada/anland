@@ -7,6 +7,7 @@
 # flashed module should be right on its own (and readable in the manager).
 set_perm "$MODPATH/waylandbridge" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
+set_perm "$MODPATH/anland-focus-new.sh" 0 0 0755
 
 # KernelSU does not consume a standalone *.anland service-context fragment.
 # Build a system overlay from the device's live platform file so

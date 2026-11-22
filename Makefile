@@ -144,7 +144,7 @@ module: native pulse
 	rm -rf "$(OUT)/module"
 	mkdir -p "$$MOD"
 	cp module/module.prop module/sepolicy.rule module/service.sh \
-	   module/customize.sh "$$MOD/"
+	   module/customize.sh module/anland-focus-new.sh "$$MOD/"
 	# plat_service_contexts.anland 是可选的：完整的 contexts 文件不随包发布，
 	# customize.sh 在刷机时从设备上系统的原件现场生成（避免旧 OTA 的残留遮蔽）。
 	# 模板片段在 908b44f 里被删掉了，所以这里必须容忍它不存在，
@@ -155,9 +155,10 @@ module: native pulse
 	cp LICENSE "$$MOD/"
 	cp "$(OUT)/waylandbridge" "$$MOD/"
 	cp -r "$(PA_ROOT)" "$$MOD/pulse"   # PulseAudio tree (bin/lib/etc), see `make pulse`
-	chmod 755 "$$MOD/waylandbridge" "$$MOD/service.sh" "$$MOD/customize.sh" "$$MOD"/pulse/bin/*
+	chmod 755 "$$MOD/waylandbridge" "$$MOD/service.sh" "$$MOD/customize.sh" "$$MOD/anland-focus-new.sh" "$$MOD"/pulse/bin/*
 	(cd "$$MOD" && zip -qr "$(OUT)/module/anland-awl.zip" \
 	  module.prop sepolicy.rule service.sh customize.sh \
+  anland-focus-new.sh \
 	  plat_service_contexts.anland waylandbridge pulse \
 	  LICENSE)
 	echo "OK: $(OUT)/module/anland-awl.zip"
