@@ -2325,7 +2325,38 @@ static binder_status_t host_on_transact(AIBinder* binder, transaction_code_t cod
          * work runs on its own thread; failures land in the log below the
          * 'app launch:' tag. */
         std::thread([container, user, appid]() {
-            launch_container_app(container, user, appid);
+            /* Remember the newest window before launching: a single-instance
+             * application (Chrome, most GNOME apps) hands the request to the
+             * instance already running and exits, so no window is created and
+             * tapping the icon appears to do nothing while the window sits
+             * behind the launcher. */
+            uint64_t before = 0;
+            {
+                std::lock_guard<std::mutex> lk(g_state_lock);
+                for (auto& w : g_wins) before = w.first > before ? w.first : before;
+            }
+            bool ok = launch_container_app(container, user, appid);
+            /* give a fresh window time to map... */
+            for (int i = 0; i < 6; i++) {
+                {
+                    std::lock_guard<std::mutex> lk(g_state_lock);
+                    for (auto& w : g_wins)
+                        if (w.first > before) return;   /* new window: attach did it */
+                }
+                sleep(1);
+            }
+            /* ...otherwise front the newest existing window (the instance that
+             * took over the request). */
+            uint64_t front = 0;
+            {
+                std::lock_guard<std::mutex> lk(g_state_lock);
+                for (auto& w : g_wins) front = w.first > front ? w.first : front;
+            }
+            if (ok && front) {
+                LOGI("app launch: %s already running → fronting window %llu",
+                     appid.c_str(), (unsigned long long)front);
+                attach_activity(front, "");
+            }
         }).detach();
         AParcel_writeInt32(out, 0);
         return STATUS_OK;
