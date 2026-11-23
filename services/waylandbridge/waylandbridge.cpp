@@ -762,7 +762,11 @@ static bool launch_container_app(const std::string& container,
     if (pid == 0) {
         for (int fd = 0; fd < 3; fd++) (void)!close(fd);
         int nul = open("/dev/null", O_RDWR);
-        if (nul >= 0) { dup2(nul, 0); dup2(nul, 2); }   /* keep fd 1 for logs */
+        /* Restore all three: leaving stdout closed makes tools that detect a
+         * closed stream behave differently — `systemd-run` inside the launcher
+         * helper silently stopped creating its unit, so the app was never
+         * started while droidspaces still reported success. */
+        if (nul >= 0) { dup2(nul, 0); dup2(nul, 1); dup2(nul, 2); }
         std::string name_arg = container;
         const char* argv[10];
         int n = 0;
