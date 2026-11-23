@@ -173,6 +173,16 @@ XWL_BIN=$(command -v Xwayland) || {
     echo "anland-session: no Xwayland in PATH — run setupanlandx.sh" >&2
     exit 1
 }
+# A previous session can leave Xwayland behind (it runs with -noreset, and a
+# killed session does not always reap it). A stale instance keeps its display
+# number and its /tmp socket, so the next session picks a different number, the
+# old socket stays behind, and a client that connects to the stale one dies with
+# "The X11 connection broke". Clear them before starting our own.
+for p in $(pgrep -f "Xwayland -rootless" 2>/dev/null); do
+    kill "$p" 2>/dev/null
+done
+rm -f /tmp/.X11-unix/X* /tmp/.X*-lock 2>/dev/null
+
 FIFO=$(mktemp -u "${TMPDIR:-/tmp}/anlandx.XXXXXX")
 mkfifo -m 600 "$FIFO" || exit 1
 # shellcheck disable=SC2086  # ANLAND_XWAYLAND_ARGS is a word list by design
