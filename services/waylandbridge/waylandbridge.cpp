@@ -754,46 +754,24 @@ static bool launch_container_app(const std::string& container,
     snprintf(inner, sizeof(inner),
              "/usr/local/bin/anland-apps run %s", appid.c_str());
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("app launch: fork: %s", strerror(errno));
-        return false;
-    }
-    if (pid == 0) {
-        for (int fd = 0; fd < 3; fd++) (void)!close(fd);
-        int nul = open("/dev/null", O_RDWR);
-        /* Restore all three: leaving stdout closed makes tools that detect a
-         * closed stream behave differently — `systemd-run` inside the launcher
-         * helper silently stopped creating its unit, so the app was never
-         * started while droidspaces still reported success. */
-        if (nul >= 0) { dup2(nul, 0); dup2(nul, 1); dup2(nul, 2); }
-        std::string name_arg = container;
-        const char* argv[10];
-        int n = 0;
-        argv[n++] = "/data/local/Droidspaces/bin/droidspaces";
-        argv[n++] = "-n";              /* droidspaces rejects "-n=NAME" */
-        argv[n++] = name_arg.c_str();
-        argv[n++] = "run";
-        argv[n++] = "--";
-        argv[n++] = "/bin/su";
-        argv[n++] = "-";
-        argv[n++] = user.c_str();
-        argv[n++] = "-c";
-        argv[n++] = inner;
-        argv[n] = nullptr;
-        execv(argv[0], const_cast<char* const*>(argv));
-        _exit(127);
-    }
-    int st = 0;
-    if (waitpid(pid, &st, 0) < 0) {
-        LOGE("app launch: waitpid: %s", strerror(errno));
-        return false;
-    }
-    bool ok = WIFEXITED(st) && WEXITSTATUS(st) == 0;
+    /* Run through a shell, exactly like the invocation that works when typed on
+     * the device. A direct fork+execv from this daemon does not work: the daemon
+     * is a session leader, and from that context `su` hands the helper a
+     * degraded environment where `systemd-run --user` creates a unit that dies
+     * immediately — the app never starts, yet every exit status is 0.
+     *
+     * Safe because nothing here is attacker-controlled: container, user and id
+     * were whitelisted to [A-Za-z0-9._-] above and carry no shell metacharacter,
+     * and the container-side helper resolves the actual executable itself. */
+    std::string cmd = std::string("/data/local/Droidspaces/bin/droidspaces -n ") +
+                      container + " run -- /bin/su - " + user +
+                      " -c '/usr/local/bin/anland-apps run " + appid + "'";
+    int rc = system(cmd.c_str());
+    int st = (rc == -1) ? -1 : (rc >> 8);
+    bool ok = (st == 0);
     if (!ok)
-        LOGE("app launch: exit=%d (container=%s user=%s appid=%s)",
-             WIFEXITED(st) ? WEXITSTATUS(st) : -1, container.c_str(),
-             user.c_str(), appid.c_str());
+        LOGE("app launch: exit=%d (container=%s user=%s appid=%s)", st,
+             container.c_str(), user.c_str(), appid.c_str());
     else
         LOGI("app launch: %s in %s as %s", appid.c_str(), container.c_str(),
              user.c_str());
