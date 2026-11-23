@@ -747,6 +747,31 @@ static bool launch_container_app(const std::string& container,
      * bring it up rather than failing the tap. */
     if (!ensure_container_running(container))
         return false;
+    /* Bring the desktop session up from HERE, not from the container-side
+     * helper: the helper runs inside the session's own environment, so when that
+     * environment is gone (a session that died leaves no env file, no systemd
+     * user environment and no DISPLAY) it cannot tell that anything is missing
+     * and launches clients into nothing. This daemon needs no session variables
+     * at all — it only has to ask systemd inside the container to start the
+     * unit, which works whenever the container is up. */
+    {
+        std::string cmd = std::string("/data/local/Droidspaces/bin/droidspaces -n ") +
+                          container + " run -- /bin/su - " + user +
+                          " -c 'systemctl --user start anland-session' >/dev/null 2>&1";
+        (void)system(cmd.c_str());
+        /* the unit writes its environment file once Xwayland and mini-wm are up;
+         * give it time, but do not fail the launch if it is slow */
+        std::string envf = "/home/" + user + "/.anlandx-env";
+        for (int i = 0; i < 20; i++) {
+            std::string chk = std::string("/data/local/Droidspaces/bin/droidspaces -n ") +
+                              container + " run -- /bin/test -r " + envf + " >/dev/null 2>&1";
+            if (system(chk.c_str()) == 0) {
+                LOGI("app launch: session ready after %ds", i);
+                break;
+            }
+            sleep(1);
+        }
+    }
     /* --user= lookup on this droidspaces build resolves against the HOST passwd
      * and fails with ENOENT for container-only users, so switch inside the
      * container instead. Both interpolated values are whitelisted above. */
