@@ -659,12 +659,94 @@ static bool app_name_ok(const char* s, size_t max) {
     return true;
 }
 
+/* Run argv (no shell) and capture stdout; returns the exit status or -1. */
+static int run_capture(const char* const argv[], std::string* out) {
+    out->clear();
+    int fds[2];
+    if (pipe(fds) != 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) { close(fds[0]); close(fds[1]); return -1; }
+    if (pid == 0) {
+        close(fds[0]);
+        dup2(fds[1], 1);
+        close(fds[1]);
+        int nul = open("/dev/null", O_RDWR);
+        if (nul >= 0) { dup2(nul, 0); dup2(nul, 2); }
+        execv(argv[0], const_cast<char* const*>(argv));
+        _exit(127);
+    }
+    close(fds[1]);
+    char buf[2048];
+    ssize_t r;
+    while ((r = read(fds[0], buf, sizeof(buf))) > 0) {
+        if (out->size() + (size_t)r > (16u << 10)) break;
+        out->append(buf, (size_t)r);
+    }
+    close(fds[0]);
+    int st = 0;
+    if (waitpid(pid, &st, 0) < 0) return -1;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+#define DROIDSPACES_BIN "/data/local/Droidspaces/bin/droidspaces"
+#define CONTAINERS_DIR  "/data/local/Droidspaces/Containers"
+
+/* True when the container's init is alive. `pid` prints it and fails when the
+ * container is stopped, which is cheaper and less ambiguous than parsing
+ * `show`'s table. */
+static bool container_running(const std::string& container) {
+    const char* argv[5];
+    argv[0] = DROIDSPACES_BIN;
+    argv[1] = "-n";
+    argv[2] = container.c_str();
+    argv[3] = "pid";
+    argv[4] = nullptr;
+    std::string out;
+    if (run_capture(argv, &out) != 0) return false;
+    for (char c : out)
+        if (c >= '0' && c <= '9') return true;
+    return false;
+}
+
+/* Start a stopped container from its own config, the way the launcher app does:
+ * the CLI wants the config file, not just a name (a bare `start` cannot know
+ * which rootfs image to use). Waits for init to appear. */
+static bool ensure_container_running(const std::string& container) {
+    if (container_running(container)) return true;
+    std::string cfg = std::string(CONTAINERS_DIR) + "/" + container + "/container.config";
+    LOGI("app launch: starting container %s", container.c_str());
+    const char* argv[5];
+    argv[0] = DROIDSPACES_BIN;
+    argv[1] = "--config";
+    argv[2] = cfg.c_str();
+    argv[3] = "start";
+    argv[4] = nullptr;
+    std::string out;
+    if (run_capture(argv, &out) != 0) {
+        LOGE("app launch: container start failed (%s)", container.c_str());
+        return false;
+    }
+    for (int i = 0; i < 60; i++) {      /* boot + init, a few seconds in practice */
+        if (container_running(container)) {
+            LOGI("app launch: container %s up after %ds", container.c_str(), i);
+            return true;
+        }
+        sleep(1);
+    }
+    LOGE("app launch: container %s did not come up", container.c_str());
+    return false;
+}
+
 /* Launch <appid> as <user> in <container>; returns true when droidspaces
  * reported success. Blocks until the container-side helper has detached the
  * application (setsid), which is immediate. */
 static bool launch_container_app(const std::string& container,
                                  const std::string& user,
                                  const std::string& appid) {
+    /* A paused/stopped container is the normal case for a home-screen icon, so
+     * bring it up rather than failing the tap. */
+    if (!ensure_container_running(container))
+        return false;
     /* --user= lookup on this droidspaces build resolves against the HOST passwd
      * and fails with ENOENT for container-only users, so switch inside the
      * container instead. Both interpolated values are whitelisted above. */
