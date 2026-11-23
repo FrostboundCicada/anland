@@ -2318,7 +2318,16 @@ static binder_status_t host_on_transact(AIBinder* binder, transaction_code_t cod
             AParcel_writeInt32(out, -1);
             return STATUS_OK;
         }
-        AParcel_writeInt32(out, launch_container_app(container, user, appid) ? 0 : -1);
+        /* Fire and forget: the caller is a launcher activity with no UI, and a
+         * cold container takes tens of seconds to boot. Waiting here blocks the
+         * caller's main thread past the activity destroy timeout, so the launch
+         * is cancelled halfway and the shortcut appears to do nothing. The
+         * work runs on its own thread; failures land in the log below the
+         * 'app launch:' tag. */
+        std::thread([container, user, appid]() {
+            launch_container_app(container, user, appid);
+        }).detach();
+        AParcel_writeInt32(out, 0);
         return STATUS_OK;
     }
     default:

@@ -90,6 +90,11 @@ cleanup() {
     [ -n "${WMPID:-}" ] && kill "$WMPID" 2>/dev/null
     [ -n "${XPID:-}" ] && kill "$XPID" 2>/dev/null
     [ -n "$OUR_DBUS_PID" ] && kill "$OUR_DBUS_PID" 2>/dev/null
+    # portals were started by this session; they cannot outlive its bus
+    if [ -f "$RT/anland-portal.pid" ]; then
+        while read -r p; do kill "$p" 2>/dev/null; done < "$RT/anland-portal.pid"
+        rm -f "$RT/anland-portal.pid"
+    fi
     systemctl --user unset-environment DISPLAY WAYLAND_DISPLAY XDG_SESSION_TYPE 2>/dev/null || true
     rm -f "$STATE" "$ENVF" "$WL_LINK"
 }
@@ -142,6 +147,23 @@ export PATH="$APP_PATH"
 if [ -S "$ANLAND_RUNTIME_DIR/pulse.sock" ]; then
     printf 'PULSE_SERVER=unix:%s\n' "$ANLAND_RUNTIME_DIR/pulse.sock" >> "$ENVF"
 fi
+
+# xdg-desktop-portal: GTK applications ask it for the clock format, inhibit,
+# geolocation and file dialogs before they map a window. Without it every such
+# call waits out its D-Bus activation timeout (tens of seconds) and the window
+# appears late or not at all — a shortcut then looks broken. The image ships
+# the portal and its GTK backend but nothing starts them in this session, and
+# D-Bus activation is not available for a bare dbus-launch bus, so start them
+# explicitly (backend first: the portal proxies its interfaces).
+start_portal() {
+    p="$1"
+    [ -x "$p" ] || command -v "$(basename "$p")" >/dev/null 2>&1 || return 0
+    pgrep -f "$(basename "$p")" >/dev/null 2>&1 && return 0
+    "$p" >/dev/null 2>&1 &
+    printf '%s' "$!" >> "$RT/anland-portal.pid" 2>/dev/null || true
+}
+start_portal /usr/libexec/xdg-desktop-portal-gtk
+start_portal /usr/libexec/xdg-desktop-portal
 
 # display number handshake: Xwayland writes "N\n" to fd 3 once it listens.
 # Resolved through the session PATH above: the patched ~/.local/bin build
