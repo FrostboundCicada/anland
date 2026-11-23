@@ -13,6 +13,51 @@ links therefore no longer resolve); `6.2-ds8` had no separate entry because its
 content is `v6.2.8`, so that release was deleted to avoid a duplicate. All
 content is archived below.
 
+## 6.2.14 - 2026-11-23
+
+### Fixed
+
+**A tapped shortcut now actually launches the app.** The daemon started the
+container-side helper with `fork` + `execv`, and because the daemon is a session
+leader, `su` handed that child a degraded environment in which the helper's
+`systemd-run --user` created a unit that died immediately. The application was
+never started, yet `droidspaces` exited 0 and every log line reported success,
+so a dead tap was indistinguishable from a working one. The helper is now run
+through a shell, which is the form that works on the device. The container, user
+and app id were already whitelisted to `[A-Za-z0-9._-]`, so no new quoting
+surface is introduced.
+
+**Restore stdout before exec'ing the helper.** The launch path closed fds 0, 1
+and 2 and then restored only stdin and stderr, while the comment claimed stdout
+was kept for logs. A child with a closed stdout behaves differently from one on
+`/dev/null`: the same helper's `systemd-run` stopped creating its unit at all.
+Reproduced by running the identical argv with the daemon's stdio.
+
+**Start the session from the daemon, not from the container helper.** The helper
+runs inside the session's own environment, so when that environment is gone — a
+session that died leaves no env file, no systemd user environment and no
+`DISPLAY` — it sees nothing missing and launches the client into nothing. This
+daemon needs no session variables at all: it asks systemd in the container to
+start the unit, which works whenever the container is up, and waits for the
+environment file the session writes once Xwayland and mini-wm are ready.
+Verified with the session stopped: a tap logs `session ready after 0s`, the
+surface attaches at 3200x2136 and the window renders and takes focus.
+
+**Front an already-running app when its icon is tapped.** Single-instance
+applications hand a second launch to the instance already running and exit, so
+no window is created and the tap looked ignored while the window sat behind the
+launcher. The newest window id is recorded before launching, and if no newer
+window appears within a few seconds the newest existing one is attached.
+
+### Changed
+
+**Reap stale Xwayland before starting a new one.** Xwayland runs with `-noreset`
+and a killed session does not always reap it, so instances accumulate and each
+keeps its display number and its `/tmp` socket. The next session then picks a
+different number, and a client that connects to the stale socket dies with
+`The X11 connection broke`. Leftovers and the socket/lock files are now cleared
+before the session starts its own.
+
 ## 6.2.13 - 2026-11-22
 
 ### Added
