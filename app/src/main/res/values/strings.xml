@@ -5,6 +5,7 @@
     <!-- MainActivity -->
     <string name="settings_title">Window Settings</string>
     <string name="status_daemon_unreachable">daemon not connected (binder anland.host unreachable)</string>
+    <string name="app_launch_failed">could not start %1$s</string>
     <string name="status_window_count">Windows: %1$d (daemon running)</string>
     <string name="status_empty">No wayland windows yet\n(start a Wayland app in the container)</string>
     <string name="window_fallback_title">Window %1$d</string>

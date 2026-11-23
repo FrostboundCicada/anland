@@ -21,6 +21,7 @@ public final class WlBinder {
     private static final String DESCRIPTOR = "anland.IHost";
     public static final int T_CFG_GET = 12;   /* (key) → val: read a daemon config (#31) */
     public static final int T_CFG_SET = 13;   /* (key,val) → ok: apply + persist in daemon (#31) */
+    public static final int T_APP_LAUNCH = 19; /* (container,user,appid) → ok: start a container app */
 
     private static IBinder s;
 
@@ -82,6 +83,31 @@ public final class WlBinder {
             return r.dataSize() >= 4 ? r.readInt() : -1;
         } catch (Exception e) {
             Log.e(TAG, "CFG_SET failed", e);
+            s = null;
+            return -1;
+        } finally {
+            d.recycle();
+            r.recycle();
+        }
+    }
+
+    /** Start one container application by .desktop id; 0 = success. The daemon
+     *  holds the root the launcher app would otherwise need, so a shortcut can
+     *  point at this package and still launch container software. */
+    public static int appLaunch(String container, String user, String appid) {
+        IBinder b = get();
+        if (b == null) return -1;
+        Parcel d = Parcel.obtain();
+        Parcel r = Parcel.obtain();
+        try {
+            d.writeInterfaceToken(DESCRIPTOR);
+            d.writeString(container == null ? "" : container);
+            d.writeString(user == null ? "" : user);
+            d.writeString(appid == null ? "" : appid);
+            b.transact(T_APP_LAUNCH, d, r, 0);
+            return r.dataSize() >= 4 ? r.readInt() : -1;
+        } catch (Exception e) {
+            Log.e(TAG, "APP_LAUNCH failed", e);
             s = null;
             return -1;
         } finally {

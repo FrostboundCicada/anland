@@ -5,6 +5,7 @@
     <!-- MainActivity -->
     <string name="settings_title">窗口设置</string>
     <string name="status_daemon_unreachable">daemon 未连接（binder anland.host 不可达）</string>
+    <string name="app_launch_failed">无法启动 %1$s</string>
     <string name="status_window_count">窗口数: %1$d（daemon 运行中）</string>
     <string name="status_empty">暂无 wayland 窗口\n（在容器中启动 Wayland 应用）</string>
     <string name="window_fallback_title">窗口 %1$d</string>

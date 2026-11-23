@@ -33,6 +33,17 @@
              merged in from the libawl library module (same code third-party
              consumer apps run) -->
 
+        <!-- 桌面快捷方式的入口：透明、无布局、启动容器软体后立即 finish。
+             放在本包而不是启动器包里，是为了让快捷方式的目标与窗口宿主同包，
+             点下去直接进入应用，不经过启动器的加载界面。 -->
+        <activity
+            android:name=".AppLaunchActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
+
         <!-- Window behavior settings。anland.action.OPEN_SETTINGS 让额外按键栏的
              「设置」键能从 libawl 库模块里跨模块拉起（库不依赖 app 类）。 -->
         <activity android:name=".WlSettingsActivity" android:exported="true">

@@ -195,6 +195,12 @@ enum {
                             * daemon's death will never EOF yours); (4)
                             * wl_display_connect_to_fd on the kept end. With
                             * config socket_listen=0 this is the only way in. */
+    AWL_T_APP_LAUNCH = 19, /* (container:string16 user:string16 appid:string16)
+                            * → ok:i32; start one container application. The
+                            * daemon does this rather than the launcher app so
+                            * a pinned shortcut can carry an activity in the
+                            * package that hosts the window: the caller only
+                            * names a .desktop id, never an executable. */
 };
 
 /* ---- window lifecycle events (daemon → subscriber apps, delivered over
@@ -632,7 +638,83 @@ static void on_token_died(void* cookie) {
     delete dl;
 }
 
-/* ---------------- subprocess execution (am commands) ---------------- */
+/* ---------------- container app launch (home-screen shortcuts) ----------------
+ * A pinned shortcut carries an activity in this package, so tapping it lands in
+ * the same task family as the window it opens instead of detouring through the
+ * launcher app's UI. The launcher app cannot start container software directly
+ * without root, so the request comes here over binder.
+ *
+ * Safety: the caller is an exported activity, so nothing it sends may become
+ * argv beyond a .desktop id. The id selects a file inside the container and the
+ * container-side helper resolves the Exec line from it; no executable path,
+ * flag or shell string crosses the binder boundary. */
+
+static bool app_name_ok(const char* s, size_t max) {
+    if (!s || !*s || strlen(s) > max) return false;
+    for (const char* p = s; *p; p++) {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+              (*p >= '0' && *p <= '9') || *p == '-' || *p == '_' || *p == '.'))
+            return false;
+    }
+    return true;
+}
+
+/* Launch <appid> as <user> in <container>; returns true when droidspaces
+ * reported success. Blocks until the container-side helper has detached the
+ * application (setsid), which is immediate. */
+static bool launch_container_app(const std::string& container,
+                                 const std::string& user,
+                                 const std::string& appid) {
+    /* --user= lookup on this droidspaces build resolves against the HOST passwd
+     * and fails with ENOENT for container-only users, so switch inside the
+     * container instead. Both interpolated values are whitelisted above. */
+    char inner[512];
+    snprintf(inner, sizeof(inner),
+             "/usr/local/bin/anland-apps run %s", appid.c_str());
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOGE("app launch: fork: %s", strerror(errno));
+        return false;
+    }
+    if (pid == 0) {
+        for (int fd = 0; fd < 3; fd++) (void)!close(fd);
+        int nul = open("/dev/null", O_RDWR);
+        if (nul >= 0) { dup2(nul, 0); dup2(nul, 2); }   /* keep fd 1 for logs */
+        std::string name_arg = container;
+        const char* argv[10];
+        int n = 0;
+        argv[n++] = "/data/local/Droidspaces/bin/droidspaces";
+        argv[n++] = "-n";              /* droidspaces rejects "-n=NAME" */
+        argv[n++] = name_arg.c_str();
+        argv[n++] = "run";
+        argv[n++] = "--";
+        argv[n++] = "/bin/su";
+        argv[n++] = "-";
+        argv[n++] = user.c_str();
+        argv[n++] = "-c";
+        argv[n++] = inner;
+        argv[n] = nullptr;
+        execv(argv[0], const_cast<char* const*>(argv));
+        _exit(127);
+    }
+    int st = 0;
+    if (waitpid(pid, &st, 0) < 0) {
+        LOGE("app launch: waitpid: %s", strerror(errno));
+        return false;
+    }
+    bool ok = WIFEXITED(st) && WEXITSTATUS(st) == 0;
+    if (!ok)
+        LOGE("app launch: exit=%d (container=%s user=%s appid=%s)",
+             WIFEXITED(st) ? WEXITSTATUS(st) : -1, container.c_str(),
+             user.c_str(), appid.c_str());
+    else
+        LOGI("app launch: %s in %s as %s", appid.c_str(), container.c_str(),
+             user.c_str());
+    return ok;
+}
+
+
 
 static void run_am(const char* fmt, ...) {
     char cmd[1024];
@@ -2131,6 +2213,30 @@ static binder_status_t host_on_transact(AIBinder* binder, transaction_code_t cod
             AParcel_readInt32(in, &val) != STATUS_OK)
             return STATUS_BAD_VALUE;
         AParcel_writeInt32(out, cfg_set(key, val));
+        return STATUS_OK;
+    }
+    case AWL_T_APP_LAUNCH: {   /* start one container app for a pinned shortcut */
+        std::string container, user, appid;
+        if (AParcel_readString(in, &container, wl_str_alloc) != STATUS_OK ||
+            AParcel_readString(in, &user, wl_str_alloc) != STATUS_OK ||
+            AParcel_readString(in, &appid, wl_str_alloc) != STATUS_OK)
+            return STATUS_BAD_VALUE;
+        if (container.empty()) {
+            LOGE("app launch: no container named");
+            AParcel_writeInt32(out, -1);
+            return STATUS_OK;
+        }
+        /* user falls back to the image's desktop account; both values and the
+         * id are argv-safe by whitelist, never shell text */
+        if (user.empty()) user = "Gold";
+        if (!app_name_ok(container.c_str(), 64) || !app_name_ok(user.c_str(), 32) ||
+            !app_name_ok(appid.c_str(), 128)) {
+            LOGE("app launch: rejected container='%s' user='%s' appid='%s'",
+                 container.c_str(), user.c_str(), appid.c_str());
+            AParcel_writeInt32(out, -1);
+            return STATUS_OK;
+        }
+        AParcel_writeInt32(out, launch_container_app(container, user, appid) ? 0 : -1);
         return STATUS_OK;
     }
     default:
