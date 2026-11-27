@@ -724,8 +724,8 @@ public final class Touchpad {
                     if (synthesizeDoubleTap && gap < 300 && dist < touchSlop
                             && !isDoubleTapPending) {
                         isDoubleTapPending = true;
-                        sendButton(0x110, true);
-                        sendButton(0x110, false);
+                        // The first tap was already emitted as a single click;
+                        // this second click completes the OS-level double-click pair.
                         sendButton(0x110, true);
                         sendButton(0x110, false);
                         isDoubleTapPending = false;
