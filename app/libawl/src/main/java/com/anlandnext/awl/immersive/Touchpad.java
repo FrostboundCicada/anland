@@ -77,7 +77,8 @@ public final class Touchpad {
     private float lastTapX, lastTapY;
     private boolean isDoubleTapPending = false;
 
-    private static final long TOUCH_LONG_PRESS_TIMEOUT = 500;
+    private long rightClickTimeoutMs = 500L;
+    private long dragActivationTimeoutMs = 500L;
     private boolean hasLongPressed = false;
     private boolean isLongPressPossible = false;
     private boolean isMultiFinger = false;
@@ -139,6 +140,7 @@ public final class Touchpad {
     private float gestureScale = DEFAULT_GESTURE_SCALE;
 
     private float mouseAccelStrength = 1.0f; // 加速度强度，0.5 ~ 10.0
+    private float mouseSensitivity = 1.0f;
 
     // 禁用双指捏合/张开与三指及以上的触摸转发手势（缩放等）。开启后这些
     // 手势被吞掉（不转发为触摸），双指滚动与双指右键点击不受影响。
@@ -215,6 +217,21 @@ public final class Touchpad {
     /** Set the acceleration strength (clamped to 0.5 ~ 10.0). */
     public void setAccelStrength(float strength) {
         mouseAccelStrength = Math.max(0.5f, Math.min(10.0f, strength));
+    }
+
+    /** Set direct cursor sensitivity independently of acceleration. */
+    public void setMouseSensitivity(float sensitivity) {
+        mouseSensitivity = Math.max(0.25f, Math.min(4.0f, sensitivity));
+    }
+
+    /** Set stationary long-press right-click delay. */
+    public void setRightClickTimeout(long timeoutMs) {
+        rightClickTimeoutMs = Math.max(200L, Math.min(1500L, timeoutMs));
+    }
+
+    /** Set the hold duration required before moving into a left-button drag. */
+    public void setDragActivationTimeout(long timeoutMs) {
+        dragActivationTimeoutMs = Math.max(100L, Math.min(1500L, timeoutMs));
     }
 
     /** Set the two-finger scroll distance per pixel of travel (0.05 ~ 5.0). */
@@ -547,24 +564,23 @@ public final class Touchpad {
                     float dist = (float) Math.hypot(x - startX1, y - startY1);
 
                     if (dist > touchSlop) {
+                        long heldMs = event.getEventTime() - downTime1;
+                        if (!hasLongPressed && heldMs >= dragActivationTimeoutMs) {
+                            hasLongPressed = true;
+                            currentState = STATE_DRAGGING;
+                            isDraggingActive = true;
+                            sendButton(0x110, true);
+                            lastX1 = x;
+                            lastY1 = y;
+                            resetSmoothing();
+                            break;
+                        }
                         isLongPressPossible = false;
                         isSingleTapCandidate = false;
                         // Cleared once the remaining finger actually moves, so a
                         // scroll or drag whose second finger lifted early cannot
                         // finish as a right-click.
                         isTwoFingerTapCandidate = false;
-                    }
-
-                    if (isLongPressPossible && !hasLongPressed &&
-                            (event.getEventTime() - downTime1) >= TOUCH_LONG_PRESS_TIMEOUT) {
-                        hasLongPressed = true;
-                        currentState = STATE_DRAGGING;
-                        isDraggingActive = true;
-                        // No motion is emitted with the press: the cursor belongs to
-                        // the host and is already where the drag should start.
-                        sendButton(0x110, true);
-                        resetSmoothing();
-                        break;
                     }
 
                     float[] smoothed = applySmoothing(rawDx, rawDy);
@@ -582,8 +598,8 @@ public final class Touchpad {
                         // 限制范围，防止失控（最大不超过 10 倍）
                         dynamicScale = Math.max(0.3f, Math.min(10.0f, dynamicScale));
 
-                        float moveX = smoothDx * dynamicScale;
-                        float moveY = smoothDy * dynamicScale;
+                        float moveX = smoothDx * dynamicScale * mouseSensitivity;
+                        float moveY = smoothDy * dynamicScale * mouseSensitivity;
                         sendMotion(moveX, moveY);
                     }
 
@@ -680,6 +696,15 @@ public final class Touchpad {
                 if (isDraggingActive) {
                     sendButton(0x110, false);
                     isDraggingActive = false;
+                    resetTouchpadState();
+                    resetSmoothing();
+                    return true;
+                }
+
+                if (isLongPressPossible && !hasLongPressed
+                        && duration >= rightClickTimeoutMs) {
+                    sendButton(0x111, true);
+                    sendButton(0x111, false);
                     resetTouchpadState();
                     resetSmoothing();
                     return true;
