@@ -1,0 +1,111 @@
+# Full build: native waylandbridge + com.anlandnext APK + libawl AAR + SukiSU
+# module zip, mirroring `make all` (see the repo-root Makefile).
+#
+# Host prerequisites the Makefile assumes but the runner lacks:
+#   - wayland-scanner 1.24 — built from the pinned third_party/wayland fork so
+#     the scanner version matches the cross-compiled libwayland sources
+#   - libffi configure — the git submodule ships none (autogen fails on the
+#     runner's libtool 2.4.7); the v3.4.6 release tarball is overlaid instead
+name: Cloud build (Anland 6.x)
+
+on:
+  push:
+    branches: ['feature/**']
+  pull_request:
+  workflow_dispatch:
+
+# 仅构建并上传产物，不创建 Release。
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      NDK_VERSION: 29.0.13113456
+      BT_VERSION: 36.0.0
+      PLATFORM_VER: android-36
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Host build tools (scanner deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build pkg-config m4 patch
+
+      # libffi: overlay the v3.4.6 release tarball (same pin as the
+      # submodule) over third_party/libffi — it ships a generated configure,
+      # so `make libffi` skips autogen.sh. Ubuntu 24.04's libtool 2.4.7
+      # predates LT_SYS_SYMBOL_USCORE and cannot autogen the git checkout.
+      - name: libffi release tarball (pre-generated configure)
+        run: |
+          curl -fsSL https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz \
+            | tar xz --strip-components=1 -C third_party/libffi
+          test -x third_party/libffi/configure
+
+      - name: wayland-scanner (host, from the pinned fork)
+        run: |
+          meson setup /tmp/wl-scanner third_party/wayland \
+            -Dscanner=true -Dlibraries=false -Ddocumentation=false \
+            -Dtests=false -Ddtd_validation=false
+          ninja -C /tmp/wl-scanner
+          # meson builds it at src/wayland-scanner — install so cmake's
+          # find_program sees a stable path
+          sudo install -m755 /tmp/wl-scanner/src/wayland-scanner /usr/local/bin/wayland-scanner
+          wayland-scanner --version
+
+      - name: Cache Android SDK components
+        id: sdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/ndk
+            ${{ env.ANDROID_HOME }}/build-tools
+            ${{ env.ANDROID_HOME }}/platforms
+          key: android-${{ env.NDK_VERSION }}-${{ env.BT_VERSION }}-${{ env.PLATFORM_VER }}
+
+      - name: SDK components (NDK, build-tools, platform)
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;${NDK_VERSION}" "build-tools;${BT_VERSION}" "platforms;${PLATFORM_VER}" >/dev/null
+
+      # app/debug.keystore is gitignored and Makefile-generated; cache it so
+      # successive CI APKs stay signature-compatible (upgrade-install over
+      # previous dev builds).
+      - name: Cache debug keystore
+        id: ks
+        uses: actions/cache@v4
+        with:
+          path: app/debug.keystore
+          key: anland-debug-keystore-v1
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: libffi (one-time cross-compile bootstrap)
+        run: make libffi
+
+      - name: Build (native + apk + module)
+        run: make
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: anland-build
+          path: |
+            build/anland-wayland.apk
+            build/anland-awllib.aar
+            build/module/anland-awl.zip
+            build/anlandx.tar.gz
+          if-no-files-found: error
+
