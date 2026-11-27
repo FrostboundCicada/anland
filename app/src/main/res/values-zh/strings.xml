@@ -61,6 +61,9 @@
 
     <!-- 触摸板设置（被抓取的物理触摸板） -->
     <string name="touchpad_settings_tip">触摸板设置（用于被抓取的物理触摸板）:</string>
+    <string name="mouse_sensitivity_label">光标灵敏度</string>
+    <string name="right_click_timeout_label">静止长按右键触发时间</string>
+    <string name="drag_activation_timeout_label">长按后移动触发拖动时间</string>
     <string name="mouse_accel_label">指针加速度</string>
     <string name="scroll_speed_label">双指滚动速度</string>
     <string name="gesture_scale_label">手势幅度</string>
