@@ -681,6 +681,8 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     private ExtraKeysBar mExtraKeysBar;
     private VirtualKeyboardView mVirtualKeyboard;
     private ImmersiveInputController immersive;
+    /** 全屏触摸屏在沉浸模式下作为虚拟触摸板使用。 */
+    private Touchpad screenTouchpad;
 
     private final ExtraKeysBar.Sender mExtraSender = new ExtraKeysBar.Sender() {
         @Override public void key(int action, int evdev) {
@@ -2155,12 +2157,22 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
 
     /** 抓取到的触摸屏帧（已是视图像素）：与真实触摸共用同一条转发路径。 */
     @Override public void onGrabbedTouch(MotionEvent ev) {
-        if (id >= 0) handleTouchEvent(ev);
+        if (id < 0) return;
+        if (screenTouchpad == null) {
+            screenTouchpad = new Touchpad(this, new ImmersiveTouchpadOutput(), true);
+            applyImmersiveTouchpadPrefs(screenTouchpad);
+        }
+        screenTouchpad.setOutputSize(outputWidth(), outputHeight());
+        screenTouchpad.onTouch(ev);
     }
 
     @Override public void onTouchscreenGrabChanged(boolean grabbed) {
         /* Android 的 contact id 与 helper 的 slot 是两条流：换主人前结束旧的。 */
         endPadStream();
+        if (screenTouchpad != null) {
+            screenTouchpad.cancel();
+            if (!grabbed) screenTouchpad = null;
+        }
     }
 
     /** 被抓取的物理触摸板：识别出的运动即光标，点击是唯一的按键来源。 */
@@ -2175,6 +2187,9 @@ public class AwlWindowActivity extends Activity implements ImmersiveMode.Host {
     private void applyImmersiveTouchpadPrefs(Touchpad pad) {
         SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         pad.setAccelStrength(Math.max(0.5f, Math.min(10.0f, p.getFloat("mouse_speed", 1.0f))));
+        pad.setMouseSensitivity(p.getFloat("mouse_sensitivity", 1.0f));
+        pad.setRightClickTimeout((long) p.getFloat("right_click_timeout_ms", 500f));
+        pad.setDragActivationTimeout((long) p.getFloat("drag_activation_timeout_ms", 500f));
         pad.setScrollSpeed(p.getFloat("scroll_speed", Touchpad.DEFAULT_SCROLL_SPEED));
         pad.setScrollReversed(p.getBoolean("scroll_reverse", false));
         pad.setGestureThresholds(
