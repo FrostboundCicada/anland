@@ -12,7 +12,7 @@ on:
   push:
     # main 之外也放行 feature 分支：fork 上 workflow_dispatch 要求文件在默认分支，
     # 而默认分支是 legacy（另一个老 workflow），没法从这里手动触发。
-    branches: [main, 'feat/**']
+    branches: [main, 'feat/**', 'feature/**']
     # 打 tag 也构建，并由 release job 发 GitHub Release（用户从 fork 下改版）。
     tags: ['*']
   pull_request:
@@ -79,7 +79,7 @@ jobs:
           key: android-${{ env.NDK_VERSION }}-${{ env.BT_VERSION }}-${{ env.PLATFORM_VER }}
 
       - name: SDK components (NDK, build-tools, platform)
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.sdk.outputs.cache-hit != 'true'
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \

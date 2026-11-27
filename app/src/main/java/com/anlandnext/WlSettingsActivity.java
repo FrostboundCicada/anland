@@ -489,6 +489,12 @@ public class WlSettingsActivity extends Activity {
 
         root.addView(touchpadSlider(anland, R.string.mouse_accel_label,
                 "mouse_speed", 0.5f, 10f, 1.0f, v -> String.format("%.1fx", v)));
+        root.addView(touchpadSlider(anland, R.string.mouse_sensitivity_label,
+                "mouse_sensitivity", 0.25f, 4f, 1.0f, v -> String.format("%.2fx", v)));
+        root.addView(touchpadSlider(anland, R.string.right_click_timeout_label,
+                "right_click_timeout_ms", 200f, 1500f, 500f, v -> String.format("%.0f ms", v)));
+        root.addView(touchpadSlider(anland, R.string.drag_activation_timeout_label,
+                "drag_activation_timeout_ms", 100f, 1500f, 500f, v -> String.format("%.0f ms", v)));
         root.addView(touchpadSlider(anland, R.string.scroll_speed_label,
                 "scroll_speed", 0.05f, 2f, 0.5f, v -> String.format("%.2f", v)));
         root.addView(touchpadSlider(anland, R.string.gesture_scale_label,

@@ -60,7 +60,10 @@
     <string name="immersive_oplus_refresh">Keep OnePlus refresh rate fixed during a session</string>
 
     <!-- 触摸板设置（被抓取的物理触摸板） -->
-    <string name="touchpad_settings_tip">Touchpad settings (applied to a grabbed physical touchpad):</string>
+    <string name="touchpad_settings_tip">Touchpad settings (full-screen touchpad and grabbed physical touchpad in immersive mode):</string>
+    <string name="mouse_sensitivity_label">Cursor sensitivity</string>
+    <string name="right_click_timeout_label">Stationary long-press right-click delay</string>
+    <string name="drag_activation_timeout_label">Hold time before drag starts</string>
     <string name="mouse_accel_label">Pointer acceleration</string>
     <string name="scroll_speed_label">Two-finger scroll speed</string>
     <string name="gesture_scale_label">Gesture magnitude</string>
